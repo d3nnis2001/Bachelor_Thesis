@@ -22,11 +22,11 @@ class GLVQ(nn.Module):
 
     """
 
-    def __init__(self, input_dim, num_prototypes, num_classes, lambda_val=1.0):
+    def __init__(self, input_dim, num_prototypes, num_classes, alpha=1.0):
         super(GLVQ, self).__init__()
         # Number of classes in the dataset
         self.num_classes = num_classes
-        self.lambda_val = lambda_val
+        self.alpha = alpha
         # Number of prototypes
         self.prototypes = nn.Parameter(torch.randn(num_prototypes, input_dim))
         # Prototype label
@@ -34,22 +34,44 @@ class GLVQ(nn.Module):
                                              requires_grad=False)
     
     def forward(self, x, y):
-        # Distance between input data and prototypes
-        distances = torch.cdist(x, self.prototypes)  # (batch_size, num_prototypes)
-        
-        positive_distances = torch.full((x.size(0),), float('inf')).to(x.device)
-        negative_distances = torch.full((x.size(0),), float('inf')).to(x.device)
-        
-        same_class_mask = (self.prototype_labels.unsqueeze(0) == y.unsqueeze(1)).to(x.device)
-        different_class_mask = ~same_class_mask
 
-        positive_distances = torch.where(same_class_mask, distances, torch.full_like(distances, float('inf'))).min(dim=1).values
-        negative_distances = torch.where(different_class_mask, distances, torch.full_like(distances, float('inf'))).min(dim=1).values
+        dist = self.compute_dist(x)
 
-        mu = (positive_distances - negative_distances) / (positive_distances + negative_distances)
-        loss = torch.mean(1 / (1 + torch.exp(-self.lambda_val * mu)))
-        
-        return loss
+        d1, d2 = self.prototype_dist(dist, y)
+
+        mu = self.mu(d1, d2)
+
+        return self.compute_loss(mu)
+    
+    def prototype_dist(self, dist, y):
+        correct_mask = torch.zeros_like(dist).bool()
+        correct_mask[torch.arange(y.size(0)), y] = True
+
+        # Mask for incorrect prototypes
+        incorrect_mask = ~correct_mask
+
+        # Extract distances for correct and incorrect prototypes
+        d1 = torch.min(dist.masked_fill(~correct_mask, float('inf')), dim=1).values
+        d2 = torch.min(dist.masked_fill(~incorrect_mask, float('inf')), dim=1).values
+
+        return d1, d2
+    
+    def compute_dist(self, x):
+        x_trans = x.unsqueeze(1)
+
+        prototype_trans = self.prototypes.unsqueeze(0)
+
+        distances = torch.sum((x_trans - prototype_trans)**2, dim=2)
+        return distances
+    
+    def mu(self, d1, d2):
+        return (d1-d2)/(d1+d2)
+    
+    def compute_loss(self, mu):
+        f_mu = torch.sigmoid(-self.alpha * mu)
+        return torch.mean(f_mu)
+
+
     
     def predict(self, x):
         """
@@ -79,107 +101,30 @@ class GLVQ(nn.Module):
         self.prototypes = nn.Parameter(torch.cat([self.prototypes, new_prototypes], dim=0))
         self.prototype_labels = nn.Parameter(torch.cat([self.prototype_labels, new_labels]), requires_grad=False)
 
+class GMLVQ(GLVQ):
+    def __init__(self, input_dim, num_prototypes, num_classes, alpha=1.0):
+        super(GMLVQ, self).__init__(input_dim, num_prototypes, num_classes, alpha)
+        # Introduce a learnable Lambda matrix (Omega.T @ Omega)
+        self.omega = nn.Parameter(torch.randn(input_dim, input_dim))
 
-class GLMVQ(nn.Module):
-    def __init__(self, input_dim, num_prototypes, num_classes, lambda_val=1.0):
-        super(GLMVQ, self).__init__()
-        self.num_classes = num_classes
-        self.lambda_val = lambda_val
-        self.input_dim = input_dim
-        
-        # Prototypes
-        self.prototypes = nn.Parameter(torch.randn(num_prototypes, input_dim))
-        self.prototype_labels = nn.Parameter(
-            torch.tensor([i % num_classes for i in range(num_prototypes)]),
-            requires_grad=False
-        )
-        
-        # Create a omega matrix with random normal values
-        self.omega = nn.Parameter(
-            torch.stack([
-                torch.eye(input_dim) + torch.randn(input_dim, input_dim) * 0.01 for i in range(num_classes)
-            ])
-        )
-
-    def compute_distance(self, x, prototype, omega):
+    def compute_dist(self, x):
         """
-        Calculates ||Omega * x - Omega * w||^2
-        
+        Overrides the distance computation to use the quadratic form:
+        d_j = (x - w_j)^T * Lambda * (x - w_j),
+        where Lambda = Omega.T @ Omega.
+
         Args:
-            x: Input tensor of shape (batch_size, input_dim) oder (input_dim,)
-            prototype: Prototype tensor of shape (input_dim,)
-            omega: Transformation matrix of shape (input_dim, input_dim)
-        """
+            x (torch.Tensor): Input data.
 
-        # Make sure that x has the right shape
-        if x.dim() == 1:
-            x = torch.unsqueeze(x, 0)
-        
-        # Transform x and prototype
-        transformed_x = torch.matmul(omega, x.T).T
-        transformed_p = torch.matmul(omega, prototype)
-        
-        dist = torch.sum((transformed_x - transformed_p) ** 2, dim=-1)
+        Returns:
+            torch.Tensor: Distances to all prototypes in the transformed space.
+        """
+        # Compute Lambda = Omega.T @ Omega (positive semi-definite matrix)
+        lamb = self.omega.T @ self.omega
+
+        # Compute (x - w_j) for all prototypes
+        diff = x.unsqueeze(1) - self.prototypes.unsqueeze(0)  # (batch_size, num_prototypes, input_dim)
+
+        # Compute quadratic form for distances
+        dist = torch.einsum('bni,ij,bnj->bn', diff, lamb, diff)  # (batch_size, num_prototypes)
         return dist
-
-    def forward(self, x, y):
-        batch_size = x.size(0)
-        
-        positive_distances = torch.full((batch_size,), float('inf')).to(x.device)
-        negative_distances = torch.full((batch_size,), float('inf')).to(x.device)
-        
-        for i in range(batch_size):
-            sample = x[i]
-            label = y[i]
-            
-            distances = torch.zeros(len(self.prototypes)).to(x.device)
-            
-            for j, prototype in enumerate(self.prototypes):
-                proto_label = self.prototype_labels[j]
-                omega = self.omega[proto_label]
-                distances[j] = self.compute_distance(sample.unsqueeze(0), prototype, omega)
-            
-            same_class_mask = self.prototype_labels == label
-            diff_class_mask = ~same_class_mask
-            
-            if same_class_mask.any():
-                positive_distances[i] = distances[same_class_mask].min()
-            if diff_class_mask.any():
-                negative_distances[i] = distances[diff_class_mask].min()
-        
-        mu = (positive_distances - negative_distances) / (positive_distances + negative_distances)
-        loss = torch.mean(1 / (1 + torch.exp(-self.lambda_val * mu)))
-        
-        # Regularizaton term
-        omega_reg = torch.norm(self.omega.view(-1))
-        loss = loss + 0.01 * omega_reg
-        
-        return loss
-
-    def predict(self, x):
-        """
-        Predicts the class label for the input data.
-        """
-        batch_size = x.size(0)
-        all_distances = torch.zeros(batch_size, len(self.prototypes)).to(x.device)
-        
-        # Compute distances to all prototypes
-        for i in range(batch_size):
-            for j, prototype in enumerate(self.prototypes):
-                proto_label = self.prototype_labels[j]
-                omega = self.omega[proto_label]
-                all_distances[i, j] = self.compute_distance(x[i], prototype, omega)
-        
-        # Get closest prototype indice
-        closest_prototype_idx = torch.argmin(all_distances, dim=1)
-        predicted_labels = self.prototype_labels[closest_prototype_idx]
-        
-        return predicted_labels
-
-    def add_prototypes(self, new_prototypes, new_labels):
-        """
-        Adds new prototypes for few-shot learning.
-        """
-        # Concat the new prototypes and labels with existing ones
-        self.prototypes = nn.Parameter(torch.cat([self.prototypes, new_prototypes], dim=0))
-        self.prototype_labels = nn.Parameter(torch.cat([self.prototype_labels, new_labels]), requires_grad=False)
