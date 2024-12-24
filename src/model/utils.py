@@ -18,9 +18,9 @@ def to_tensors(X, y):
     return X_tensor, y_tensor
 
 def list_files(directory, fileformat):
-    files = []
+    found_files = []
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith(fileformat):
-                files.append(os.path.join(root, file).replace("\\", "/"))
-    return files
+                found_files.append(os.path.join(root, file).replace("\\", "/"))
+    return found_files

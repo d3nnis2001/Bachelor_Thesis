@@ -6,15 +6,16 @@ from scipy.io import loadmat
 class NearlabDatasetLoader:
     def __init__(self, folder_path):
         self.folder_path = folder_path
+        self.file_paths = None
 
     def load_data(self):
-        file_paths = list_files(self.folder_path, fileformat="csv")
-        print("HELLOO")
+        self.file_paths = list_files(self.folder_path, fileformat="csv")
         X_train_list, y_train_list = [], []
+
         
         # Load the training data
         for train_file in self.file_paths[:2]:
-            data = pd.read_csv(self.folder_path + train_file, header=None, skiprows=[0])
+            data = pd.read_csv(train_file, header=None, skiprows=[0])
             # Input Values
             X = data.iloc[:, :5120].values
             # Class
@@ -29,7 +30,7 @@ class NearlabDatasetLoader:
         y_train = np.concatenate(y_train_list, axis=0)
         
         # Load the test data
-        data = pd.read_csv(self.folder_path + self.file_paths[2], header=None, skiprows=[0])
+        data = pd.read_csv(self.file_paths[2], header=None, skiprows=[0])
         X_test = data.iloc[:, :5120].values # Values
         y_test = data.iloc[:, 5120].values  # Class
         y_test = y_test - 1
