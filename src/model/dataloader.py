@@ -6,6 +6,14 @@ import os
 from sklearn.utils import shuffle
 
 class NearlabDatasetLoader:
+    """
+    NearlabDatasetLoader class to load Nearlab dataset.
+
+    Args:
+        train_paths (list): List of file paths for training data.
+        test_paths (list): List of file paths for testing data.
+
+    """
     def __init__(self, train_paths, test_paths):
         self.train_paths = train_paths
         self.test_paths = test_paths
@@ -47,6 +55,13 @@ class NearlabDatasetLoader:
     
 
 class NinaproDatasetLoader:
+    """
+    NinaproDatasetLoader class to load Ninapro dataset.
+
+    Args:
+        train_paths (list): List of file paths for training data.
+        test_paths (list): List of file paths for testing data.
+    """
     def __init__(self, train_paths, test_paths):
         """
         Initializes the Ninapro dataset loader with training and testing file paths.
