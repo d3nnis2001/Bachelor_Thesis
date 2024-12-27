@@ -11,8 +11,33 @@ from datetime import datetime
 import numpy as np
 
 class CNet2D(nn.Module):
+    """
+    Convolutional Neural Network for 2D data. The network consists of 3 convolutional blocks followed by a dense layer.
+    The final layer is either a softmax layer for classification or a GLVQ/GMLVQ layer for prototype-based learning.
+
+    Parameters:
+    -----------
+    version : str
+        Version of the model. Can be either "Softmax", "GLVQ" or "GMLVQ".
+    num_prototypes_per_class : int
+        Number of prototypes per class for the prototype-based models.
+    num_classes : int
+        Number of classes in the dataset.
+    epochs : int
+        Number of epochs for training.
+    optimizer_type : str
+        Type of optimizer
+    learning_rate : float
+        Learning rate for the optimizer.
+    batch_size : int
+        Batch size for training.
+    device : torch.device
+        Device to use for training. If None, the device is automatically selected based on availability.
+    
+    """
     def __init__(self, version="GLVQ", num_prototypes_per_class=1, num_classes=8, epochs=5, optimizer_type="ADAM", learning_rate=0.001, batch_size=128, device=None):
         super(CNet2D, self).__init__()
+        # Parameters
         self.version = version
         self.num_prototypes_per_class = num_prototypes_per_class
         self.num_classes = num_classes
@@ -62,15 +87,19 @@ class CNet2D(nn.Module):
         # Final classification layer
         if self.version == "Softmax":
             self.classifier = nn.Linear(50, num_classes)
+            # GLVQ layer
         elif self.version == "GLVQ":
             self.classifier = GLVQ(50, self.num_prototypes_per_class, self.num_classes)
         else:
+            # GMLVQ layer
             self.classifier = GMLVQ(50, self.num_prototypes_per_class, self.num_classes)
 
         self.to(self.device)
 
     def extract_features(self, x):
-        """Extract features from input data"""
+        """
+        Extracts features from input data
+        """
         x = x.unsqueeze(1)
         x = self.feature_extractor(x)
         x = x.view(x.size(0), -1) 
@@ -78,23 +107,31 @@ class CNet2D(nn.Module):
         return features
     
     def forward(self, x, y=None):
+        """
+        Forward pass through the network
+        """
+        # Move data to device
         x = x.to(self.device)
         if y is not None:
             y = y.to(self.device)
-            
+
+        # Extract features
         features = self.extract_features(x)
-        
+        # Return the output based on the model version
         if self.version == "Softmax":
             return F.log_softmax(self.classifier(features), dim=1)
         else:
             return self.classifier(features, y)
     
     def fit(self, X, y):
-        # Move the data to the device
+        """
+        Fits the model to the input train data X and y
+        """
+        # Trainingsmode
         self.train()
         X, y = X.to(self.device), y.to(self.device)
 
-        # Load the data into the dataloader
+        # Load the data into the Tensorloader
         train_dataset = TensorDataset(X, y)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         # Check which optimizer to use
@@ -102,12 +139,11 @@ class CNet2D(nn.Module):
             self.parameters(), lr=self.learning_rate
         )
         
+        # Keep track of the training history
         history = {
             'loss': [],
             'epoch': []
         }
-        # Keep track of best loss
-        best_loss = float('inf')
 
         for epoch in range(self.epochs):
             epoch_losses = []
@@ -131,23 +167,22 @@ class CNet2D(nn.Module):
             history['epoch'].append(epoch + 1)
             
             print(f'Epoch {epoch + 1}/{self.epochs}, Loss: {avg_loss:.4f}')
-            # Save best weights
-            if avg_loss < best_loss:
-                best_loss = avg_loss
-                torch.save(self.state_dict(), f'best_model_{self.version}.pth')
 
         return history
                     
     def predict(self, X):
-        """Unified prediction interface"""
+        """
+        Predicts the class labels for the input data
+        """
         self.eval()
         X = X.to(self.device)
         with torch.no_grad():
             if self.version == "Softmax":
+                # Predict class labels with argmax
                 outputs = self(X)
                 return torch.argmax(outputs, dim=1)
             else:
-                # Für GLVQ/GMLVQ direkt die predict Methode des Classifiers nutzen
+                # Extract features and predict
                 features = self.extract_features(X)
                 return self.classifier.predict(features)
             
@@ -166,12 +201,9 @@ class CNet2D(nn.Module):
         sub_acc : bool
             Whether to print detailed accuracy metrics
                 
-        Returns:
-        --------
-        dict
-            Dictionary containing evaluation metrics
         """
-        self.eval()  # Set model to evaluation mode
+        # Set eval mode
+        self.eval()
         X = X.to(self.device)
         y = y.to(self.device)
         
