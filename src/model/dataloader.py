@@ -1,6 +1,7 @@
 from model.utils import preprocess, to_tensors, list_files
 import pandas as pd
 import numpy as np
+import torch
 from scipy.io import loadmat
 import os 
 from sklearn.utils import shuffle
@@ -23,24 +24,14 @@ class NearlabDatasetLoader:
         X_test_list, y_test_list = [], []
 
         for train_file in self.train_paths:
-            data = pd.read_csv(train_file, header=None, skiprows=[0])
-            # Input Values
-            X = data.iloc[:, :5120].values
-            # Class
-            y = data.iloc[:, 5120].values
-            y = y - 1
-            X = preprocess(X)
-            X_train_list.append(X)
-            y_train_list.append(y)
+            X_train, y_train = self._read_in_file(train_file)
+            X_train_list.append(X_train)
+            y_train_list.append(y_train)
         
         for test_file in self.test_paths:
-            data = pd.read_csv(test_file, header=None, skiprows=[0])
-            X = data.iloc[:, :5120].values
-            y = data.iloc[:, 5120].values
-            y = y - 1
-            X = preprocess(X)
-            X_test_list.append(X)
-            y_test_list.append(y)
+            X_test, y_test = self._read_in_file(test_file)
+            X_test_list.append(X_test)
+            y_test_list.append(y_test)
         
         # Combine the data
         X_train = np.concatenate(X_train_list, axis=0)
@@ -52,6 +43,15 @@ class NearlabDatasetLoader:
         X_train, y_train = to_tensors(X_train, y_train)
         X_test, y_test = to_tensors(X_test, y_test)
         return X_train, y_train, X_test, y_test
+    
+    def _read_in_file(self, filepath):
+        data = pd.read_csv(filepath, header=None, skiprows=[0])
+        X = data.iloc[:, :5120].values
+        y = data.iloc[:, 5120].values
+        y = y - 1
+        X = preprocess(X)
+        return X, y
+
     
 
 class NinaproDatasetLoader:
