@@ -8,18 +8,16 @@ class GLVQ(nn.Module):
     """
     Generalized Learning Vector Quantization (GLVQ) Layer for PyTorch.
      
-    Args:
-        input_dim (int): Dimensionality of the input data.
-        num_prototypes (int): Number of prototypes.
-        num_classes (int): Number of classes in the dataset.
-
-    Attributes:
-        prototypes (nn.Parameter): Trainable parameter for the prototypes.
-        prototype_labels (nn.Parameter): Fixed parameter for the prototype labels.
-    
-    Returns:
-        tuple(torch.Tensor, torch.Tensor): Tuple of positive and negative distances.
-
+    Parameters:
+    ----------
+    input_dim : int
+        Dimensionality of the input data.
+    num_prototypes_per_class : int
+        Number of prototypes per class.
+    num_classes : int
+        Number of classes in the dataset.
+    alpha : float
+        Alpha parameter for the sigmoid function.
     """
 
     def __init__(self, input_dim, num_prototypes_per_class, num_classes, alpha=1.0):
@@ -42,9 +40,12 @@ class GLVQ(nn.Module):
         """
         Forward pass through the GLVQ layer.
 
-        Args:
-            x (torch.Tensor): Input data.
-            y (torch.Tensor): True class labels.
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input data
+        y : torch.Tensor
+            Target labels
         """
         if not self.initialized:
             self.initialize_prototypes(x, y)
@@ -52,25 +53,25 @@ class GLVQ(nn.Module):
         d1, d2 = self.prototype_dist(dist, y)
         mu = self.mu(d1, d2)
         loss = self.compute_loss(mu)
-
-        with torch.no_grad():
-            predictions = self.predict(x)
-            accuracy = (predictions == y).float().mean()
-            print(f"Batch Accuracy: {accuracy.item():.4f}")
-            print(f"d1 mean: {d1.mean().item():.4f}, d2 mean: {d2.mean().item():.4f}")
         return loss
     
     def prototype_dist(self, dist, y):
         """
         Calculates the distances to the correct and incorrect prototypes.
+        
+        Parameters:
+        -----------
+        dist : torch.Tensor
+            Distance matrix between input and prototypes.
+        y : torch.Tensor
+            Target labels.
 
-        Args:  
-            dist (torch.Tensor): Distances between input and prototypes.
-            y (torch.Tensor): True class labels.
         """
+        # Mask for correct and incorrect prototypes
         correct_mask = self.prototype_labels.unsqueeze(0) == y.unsqueeze(1)
         incorrect_mask = ~correct_mask
 
+        # Get the distance to the closest correct and incorrect prototype
         d1 = torch.min(dist.masked_fill(~correct_mask, float('inf')), dim=1).values
         d2 = torch.min(dist.masked_fill(~incorrect_mask, float('inf')), dim=1).values
 
@@ -78,12 +79,14 @@ class GLVQ(nn.Module):
     
     def initialize_prototypes(self, X, y):
         """
-        Initializes the prototypes based on the input data and uses a 
-        k-means like approach to choose the prototypes.
+        Initializes the prototypes based on the class mean.
 
-        Args:
-            X (torch.Tensor): Input data of the shape [N, D].
-            y (torch.Tensor): Labels of the input data.
+        Parameters:
+        -----------
+        X : torch.Tensor
+            Input data
+        y : torch.Tensor
+            Target labels
         """
         # Avoids multiple initializations
         if self.initialized:
@@ -103,9 +106,9 @@ class GLVQ(nn.Module):
             # Do it for each prototype per class
             class_protos = class_mean.repeat(self.num_prototypes_per_class, 1)
             # Initialize the prototypes
-            start_idx = c * self.num_prototypes_per_class
-            end_idx = start_idx + self.num_prototypes_per_class
-            self.prototypes.data[start_idx:end_idx] = class_protos
+            start = c * self.num_prototypes_per_class
+            end = start + self.num_prototypes_per_class
+            self.prototypes.data[start:end] = class_protos
 
         self.initialized = True
 
@@ -115,8 +118,11 @@ class GLVQ(nn.Module):
         """
         Computes the squared Euclidean distance between input and prototypes.
 
-        Args:
-            x (torch.Tensor): Input data.
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input data.
+    
         """
         diff = x.unsqueeze(1) - self.prototypes.unsqueeze(0)
         return torch.sum(diff ** 2, dim=2)
@@ -125,10 +131,14 @@ class GLVQ(nn.Module):
         """
         Calculates the difference between the distances to the correct and incorrect prototypes.
 
-        Args:
-            d1 (torch.Tensor): Distance to the closest correct prototype.
-            d2 (torch.Tensor): Distance to the cloesst incorrect prototype.
+        Parameters:
+        -----------
+        d1 : torch.Tensor
+            Distance to the correct prototype.
+        d2 : torch.Tensor
+            Distance to the incorrect prototype.
         """
+        # Small epsilon to avoid division by zero
         epsilon = 1e-9
         return (d1-d2)/(d1+d2 + epsilon)
     
@@ -136,8 +146,10 @@ class GLVQ(nn.Module):
         """
         Computes the GLVQ loss using the sigmoid function.
 
-        Args:
-            mu (torch.Tensor): Difference between the distances to the correct and incorrect prototypes.
+        Parameters:
+        -----------
+        mu : torch.Tensor
+            Difference between the distances to the correct and incorrect prototypes.
         """
         f_mu = torch.sigmoid(self.alpha * mu)
         return torch.mean(f_mu)
@@ -148,14 +160,14 @@ class GLVQ(nn.Module):
         """
         Predicts the class label for the input data.
 
-        Args:
-            x (torch.Tensor): Input data.
-
-        Returns:
-            torch.Tensor: Predicted class labels.
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input data.
         """
 
         distances = self.compute_dist(x)
+        # Predict the class label based on the closest prototype for each input
         predicted_labels = self.prototype_labels[torch.argmin(distances, dim=1)]
         return predicted_labels
 
@@ -164,9 +176,12 @@ class GLVQ(nn.Module):
         """
         Adds new prototypes for few-shot learning.
 
-        Args:
-            new_prototypes (torch.Tensor): New prototypes to add.
-            new_labels (torch.Tensor): Labels for the new prototypes.
+        Parameters:
+        -----------
+        new_prototypes : torch.Tensor
+            New prototypes.
+        new_labels : torch.Tensor
+            Labels for the new prototypes.
         """
         # Concatenate the new prototypes and labels with existing ones
         self.prototypes = nn.Parameter(torch.cat([self.prototypes, new_prototypes], dim=0))
@@ -175,18 +190,17 @@ class GLVQ(nn.Module):
 class GMLVQ(GLVQ):
     """
     Generalized Matrix Learning Vector Quantization (GMLVQ) Layer for PyTorch.
-
-    Args:
-        input_dim (int): Dimensionality of the input data.
-        num_prototypes (int): Number of prototypes.
-        num_classes (int): Number of classes in the dataset.
-        alpha (float): Alpha parameter for the sigmoid function.
-
-    Attributes:
-        omega (nn.Parameter): Learnable metric transformation matrix.
-
-    Returns:
-        torch.Tensor: Transformed distances between input and prototypes
+    
+    Parameters:
+    -----------
+    input_dim : int
+        Dimensionality of the input data.
+    num_prototypes : int
+        Number of prototypes.
+    num_classes : int
+        Number of classes in the dataset.
+    alpha : float
+        Alpha parameter for the sigmoid function.
     """
     def __init__(self, input_dim, num_prototypes, num_classes, alpha=1.0):
         super(GMLVQ, self).__init__(input_dim, num_prototypes, num_classes, alpha)
@@ -197,11 +211,10 @@ class GMLVQ(GLVQ):
             """
             Overrides the distance computation to include the learnable metric transformation.
 
-            Args:
-                x (torch.Tensor): Input data.
-
-            Returns:
-                torch.Tensor: Transformed distances between input and prototypes.
+            Parameters:
+            -----------
+            x : torch.Tensor
+                Input data.
             """
             # Apply metric transformation
             x_transformed = torch.matmul(x, self.omega.T)

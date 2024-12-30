@@ -99,6 +99,11 @@ class CNet2D(nn.Module):
     def extract_features(self, x):
         """
         Extracts features from input data
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input data
         """
         x = x.unsqueeze(1)
         x = self.feature_extractor(x)
@@ -109,6 +114,11 @@ class CNet2D(nn.Module):
     def forward(self, x, y=None):
         """
         Forward pass through the network
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input data
         """
         # Move data to device
         x = x.to(self.device)
@@ -126,6 +136,11 @@ class CNet2D(nn.Module):
     def fit(self, X, y):
         """
         Fits the model to the input train data X and y
+
+        Parameters:
+        -----------
+        X : torch.Tensor
+            Input data
         """
         # Trainingsmode
         self.train()
@@ -173,6 +188,11 @@ class CNet2D(nn.Module):
     def predict(self, X):
         """
         Predicts the class labels for the input data
+
+        Parameters:
+        -----------
+        X : torch.Tensor
+            Input data
         """
         self.eval()
         X = X.to(self.device)
@@ -185,6 +205,25 @@ class CNet2D(nn.Module):
                 # Extract features and predict
                 features = self.extract_features(X)
                 return self.classifier.predict(features)
+            
+    def add_new_class(self, new_data, new_labels):
+        """
+        Adds new prototypes for few-shot learning.
+
+        Parameters:
+        -----------
+        new_data : torch.Tensor 
+            Data of the new classes.
+        new_labels : torch.Tensor
+            Labels for the new classes
+        """
+        if self.version in ["GLVQ", "GMLVQ"]:
+            # Extrahiere Features für neue Daten
+            new_features = self.extract_features(new_data)
+            # Füge die neuen Prototypen hinzu
+            self.classifier.add_prototypes(new_features, new_labels)
+        else:
+            raise ValueError("Prototype addition is only supported for GLVQ or GMLVQ versions.")
             
     def evaluate_model(self, X, y, conf_matrix=True, sub_acc=True):
         """
