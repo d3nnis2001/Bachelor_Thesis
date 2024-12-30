@@ -72,7 +72,7 @@ class CNet2D(nn.Module):
             nn.Dropout(0.3)
         )
         
-        # Dense Feature Extraction
+        # Dense layers
         self.dense_features = nn.Sequential(
             nn.Linear(64 * 10 * 64, 300),
             nn.BatchNorm1d(300),
@@ -156,8 +156,8 @@ class CNet2D(nn.Module):
         
         # Keep track of the training history
         history = {
-            'loss': [],
-            'epoch': []
+            "loss": [],
+            "epoch": []
         }
 
         for epoch in range(self.epochs):
@@ -178,10 +178,10 @@ class CNet2D(nn.Module):
                 epoch_losses.append(loss.item())
 
             avg_loss = np.mean(epoch_losses)
-            history['loss'].append(avg_loss)
-            history['epoch'].append(epoch + 1)
+            history["loss"].append(avg_loss)
+            history["epoch"].append(epoch + 1)
             
-            print(f'Epoch {epoch + 1}/{self.epochs}, Loss: {avg_loss:.4f}')
+            print(f"Epoch {epoch + 1}/{self.epochs}, Loss: {avg_loss:.4f}")
 
         return history
                     
@@ -208,22 +208,58 @@ class CNet2D(nn.Module):
             
     def add_new_class(self, new_data, new_labels):
         """
-        Adds new prototypes for few-shot learning.
-
+        Adds a new class to the model
+        
         Parameters:
         -----------
-        new_data : torch.Tensor 
-            Data of the new classes.
+        new_data : torch.Tensor
+            Data of new class
         new_labels : torch.Tensor
-            Labels for the new classes
+            Label of new class
+        num_prototypes : int
+            Number of prototypes for the class
         """
         if self.version in ["GLVQ", "GMLVQ"]:
-            # Extrahiere Features für neue Daten
-            new_features = self.extract_features(new_data)
-            # Füge die neuen Prototypen hinzu
-            self.classifier.add_prototypes(new_features, new_labels)
+            with torch.no_grad():
+                new_data = new_data.to(self.device)
+                new_labels = new_labels.to(self.device)
+                # Extract features
+                features = self.extract_features(new_data)
+                # Calc mean of training data
+                class_mean = features.mean(dim=0)
+                # Repeat it incase we have multiple prototypes
+                prototype_features = class_mean.repeat(self.num_prototypes_per_class, 1)
+                prototype_labels = new_labels.repeat(self.num_prototypes_per_class)
+                # Adds the Prototype to the layer
+                self.classifier.add_prototypes(prototype_features, prototype_labels)
         else:
+            # Incase you try to use it with the softmax version
             raise ValueError("Prototype addition is only supported for GLVQ or GMLVQ versions.")
+        
+    def optimize_new_prototypes(self, new_data, new_labels, epochs=5):
+        """
+        Optimiert die neu hinzugefügten Prototypen.
+        
+        Parameters:
+        -----------
+        new_data : torch.Tensor
+            Daten der neuen Klasse
+        new_labels : torch.Tensor
+            Labels der neuen Klasse
+        epochs : int
+            Anzahl der Optimierungsschritte
+        """
+        if self.version in ["GLVQ", "GMLVQ"]:
+            new_data = new_data.to(self.device)
+            new_labels = new_labels.to(self.device)
+            #  Set optimizer
+            optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)([self.classifier.prototypes], lr=self.learning_rate)
+            for epoch in range(epochs):
+                optimizer.zero_grad()
+                loss = self.forward(new_data, new_labels)
+                loss.backward()
+                optimizer.step()
+                print(f"FSL Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
             
     def evaluate_model(self, X, y, conf_matrix=True, sub_acc=True):
         """
@@ -255,33 +291,32 @@ class CNet2D(nn.Module):
         
         # Calculate accuracy
         accuracy = (predicted == y).float().mean()
-        print(f'Test Accuracy: {accuracy.item():.4f}')
+        print(f"Test Accuracy: {accuracy.item():.4f}")
         
         # Define class names
-        class_names = ['Flexion', 'Extension', 'Supination', 'Pronation', 
-                    'Open', 'Pinch', 'Lateral pinch', 'Fist']
+        class_names = ["Flexion", "Extension", "Supination", "Pronation", 
+                    "Open", "Pinch", "Lateral pinch", "Fist"]
         
         # Calculate confusion matrix
         cm = confusion_matrix(y_true, y_pred)
         
         if conf_matrix:
             plt.figure(figsize=(12, 10))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
                         xticklabels=class_names,
                         yticklabels=class_names)
-            plt.title(f'Confusion Matrix - {self.version}')
-            plt.xlabel('Predicted Label')
-            plt.ylabel('True Label')
-            plt.xticks(rotation=45, ha='right')
+            plt.title(f"Confusion Matrix - {self.version}")
+            plt.xlabel("Predicted Label")
+            plt.ylabel("True Label")
+            plt.xticks(rotation=45, ha="right")
             plt.yticks(rotation=0)
             plt.tight_layout()
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            plt.savefig(f'confusion_matrix_{self.version}_{timestamp}.png')
+            plt.savefig(f"confusion_matrix_{self.version}_{timestamp}.png")
             plt.show()
         
         per_class_acc = cm.diagonal() / cm.sum(axis=1)
-        
         if sub_acc:
             print("\nClassification Report:")
             print(classification_report(y_true, y_pred, target_names=class_names))
@@ -291,9 +326,9 @@ class CNet2D(nn.Module):
                 print(f"{name}: {acc:.4f}")
         
         return {
-            'accuracy': accuracy.item(),
-            'confusion_matrix': cm,
-            'per_class_accuracy': per_class_acc,
-            'predictions': y_pred,
-            'true_labels': y_true
+            "accuracy": accuracy.item(),
+            "confusion_matrix": cm,
+            "per_class_accuracy": per_class_acc,
+            "predictions": y_pred,
+            "true_labels": y_true
         }

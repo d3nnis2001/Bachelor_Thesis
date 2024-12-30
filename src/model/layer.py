@@ -72,8 +72,8 @@ class GLVQ(nn.Module):
         incorrect_mask = ~correct_mask
 
         # Get the distance to the closest correct and incorrect prototype
-        d1 = torch.min(dist.masked_fill(~correct_mask, float('inf')), dim=1).values
-        d2 = torch.min(dist.masked_fill(~incorrect_mask, float('inf')), dim=1).values
+        d1 = torch.min(dist.masked_fill(~correct_mask, float("inf")), dim=1).values
+        d2 = torch.min(dist.masked_fill(~incorrect_mask, float("inf")), dim=1).values
 
         return d1, d2
     
@@ -88,6 +88,8 @@ class GLVQ(nn.Module):
         y : torch.Tensor
             Target labels
         """
+        X = X.to(self.prototypes.device)
+        y = y.to(self.prototype_labels.device)
         # Avoids multiple initializations
         if self.initialized:
             return
@@ -183,6 +185,8 @@ class GLVQ(nn.Module):
         new_labels : torch.Tensor
             Labels for the new prototypes.
         """
+        new_prototypes = new_prototypes.to(self.prototypes.device)
+        new_labels = new_labels.to(self.prototype_labels.device)
         # Concatenate the new prototypes and labels with existing ones
         self.prototypes = nn.Parameter(torch.cat([self.prototypes, new_prototypes], dim=0))
         self.prototype_labels = nn.Parameter(torch.cat([self.prototype_labels, new_labels]), requires_grad=False)
