@@ -10,9 +10,12 @@ class NearlabDatasetLoader:
     """
     NearlabDatasetLoader class to load Nearlab dataset.
 
-    Args:
-        train_paths (list): List of file paths for training data.
-        test_paths (list): List of file paths for testing data.
+    Parameters:
+    ----------
+    train_paths : list
+        List of file paths for training data.
+    test_paths : list
+        List of file paths for testing data.
 
     """
     def __init__(self, train_paths, test_paths):
@@ -58,28 +61,20 @@ class NinaproDatasetLoader:
     """
     NinaproDatasetLoader class to load Ninapro dataset.
 
-    Args:
-        train_paths (list): List of file paths for training data.
-        test_paths (list): List of file paths for testing data.
+    Parameters:
+    ----------
+    train_paths : list
+        List of file paths for training data.
+    test_paths : list
+        List of file paths for testing data.
+
     """
     def __init__(self, train_paths, test_paths):
-        """
-        Initializes the Ninapro dataset loader with training and testing file paths.
 
-        Args:
-            train_paths (list): List of file paths for training data.
-            test_paths (list): List of file paths for testing data.
-        """
         self.train_paths = train_paths
         self.test_paths = test_paths
 
     def load_data(self):
-        """
-        Loads and processes Ninapro data from the provided file paths.
-
-        Returns:
-            tuple: Processed training and testing data as PyTorch tensors.
-        """
         X_train_list, y_train_list = [], []
         X_test_list, y_test_list = [], []
 
@@ -107,28 +102,10 @@ class NinaproDatasetLoader:
         return X_train, y_train, X_test, y_test
 
     def _load_ninapro_file(self, file_path):
-        """
-        Loads a Ninapro data file.
-
-        Args:
-            file_path (str): Path to the Ninapro data file.
-
-        Returns:
-            pd.DataFrame: Loaded data as a Pandas DataFrame.
-        """
         data = pd.read_csv(file_path, header=None)
         return data
 
     def _process_data(self, data):
-        """
-        Processes raw Ninapro data.
-
-        Args:
-            data (pd.DataFrame): Raw data from a Ninapro file.
-
-        Returns:
-            tuple: Processed feature matrix and labels.
-        """
         # Extract input values (features) and class labels
         X = data.iloc[:, :-1].values  # All columns except the last
         y = data.iloc[:, -1].values  # The last column contains labels
@@ -141,30 +118,11 @@ class NinaproDatasetLoader:
         return X, y
 
     def _preprocess(self, X):
-        """
-        Applies preprocessing to the input features.
-
-        Args:
-            X (np.ndarray): Raw input features.
-
-        Returns:
-            np.ndarray: Preprocessed features.
-        """
         # Example: Normalize EMG data to range [0, 1]
         X = (X - np.min(X, axis=1, keepdims=True)) / (np.ptp(X, axis=1, keepdims=True) + 1e-8)
         return X
 
     def _to_tensors(self, X, y):
-        """
-        Converts data arrays to PyTorch tensors.
-
-        Args:
-            X (np.ndarray): Feature matrix.
-            y (np.ndarray): Labels.
-
-        Returns:
-            tuple: Feature and label tensors.
-        """
         X_tensor = torch.tensor(X, dtype=torch.float32)
         y_tensor = torch.tensor(y, dtype=torch.long)
         return X_tensor, y_tensor
