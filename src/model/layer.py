@@ -185,11 +185,27 @@ class GLVQ(nn.Module):
         new_labels : torch.Tensor
             Labels for the new prototypes.
         """
+        self.num_classes += 1
+        self.num_prototypes += 1 * self.num_prototypes_per_class
         new_prototypes = new_prototypes.to(self.prototypes.device)
         new_labels = new_labels.to(self.prototype_labels.device)
         # Concatenate the new prototypes and labels with existing ones
         self.prototypes = nn.Parameter(torch.cat([self.prototypes, new_prototypes], dim=0))
         self.prototype_labels = nn.Parameter(torch.cat([self.prototype_labels, new_labels]), requires_grad=False)
+
+    # Getter and Setter
+    def get_prototypes(self):
+        return self.prototypes
+
+    def get_prototype_labels(self):
+        return self.prototype_labels
+    
+    def get_num_classes(self):
+        return self.num_classes
+    
+    def get_num_prototypes(self):
+        return self.num_prototypes
+
 
 class GMLVQ(GLVQ):
     """

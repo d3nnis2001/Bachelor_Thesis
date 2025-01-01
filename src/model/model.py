@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
 from datetime import datetime
+import os
+import pandas as pd
 import numpy as np
 
 class CNet2D(nn.Module):
@@ -221,6 +223,7 @@ class CNet2D(nn.Module):
         """
         if self.version in ["GLVQ", "GMLVQ"]:
             with torch.no_grad():
+                self.num_classes += 1
                 new_data = new_data.to(self.device)
                 new_labels = new_labels.to(self.device)
                 # Extract features
@@ -238,28 +241,52 @@ class CNet2D(nn.Module):
         
     def optimize_new_prototypes(self, new_data, new_labels, epochs=5):
         """
-        Optimiert die neu hinzugefügten Prototypen.
+        Optimizes the new prototypes for few-shot learning
         
         Parameters:
         -----------
         new_data : torch.Tensor
-            Daten der neuen Klasse
+            Data of the new class
         new_labels : torch.Tensor
-            Labels der neuen Klasse
+            Labels of the new class
         epochs : int
-            Anzahl der Optimierungsschritte
+            Number of optimization steps
         """
         if self.version in ["GLVQ", "GMLVQ"]:
             new_data = new_data.to(self.device)
             new_labels = new_labels.to(self.device)
-            #  Set optimizer
+            
+            # Create optimizer for all prototypes
             optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)([self.classifier.prototypes], lr=self.learning_rate)
+            # Create a temporary dataset and loader for batch processing
+            train_dataset = TensorDataset(new_data, new_labels)
+            train_loader = DataLoader(train_dataset, 
+                                    batch_size=min(32, len(new_data)), 
+                                    shuffle=True)
+            
+            # Store original prototypes
+            with torch.no_grad():
+                original_prototypes = self.classifier.prototypes.clone()
+                start_idx = (self.num_classes - 1) * self.num_prototypes_per_class
+            
             for epoch in range(epochs):
-                optimizer.zero_grad()
-                loss = self.forward(new_data, new_labels)
-                loss.backward()
-                optimizer.step()
-                print(f"FSL Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+                epoch_loss = 0
+                for batch_X, batch_y in train_loader:
+                    optimizer.zero_grad()
+                    features = self.extract_features(batch_X)
+                    loss = self.classifier(features, batch_y)
+                    loss.backward()
+                    
+                    # Only update new prototypes, reset old ones
+                    with torch.no_grad():
+                        self.classifier.prototypes.data[:start_idx] = original_prototypes[:start_idx].clone()
+                    
+                    optimizer.step()
+                    epoch_loss += loss.item()
+                
+                print(f"FSL Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}")
+        else:
+            raise ValueError("Prototype optimization is only supported for GLVQ or GMLVQ versions.")
             
     def evaluate_model(self, X, y, conf_matrix=True, sub_acc=True):
         """
@@ -332,3 +359,37 @@ class CNet2D(nn.Module):
             "predictions": y_pred,
             "true_labels": y_true
         }
+    
+    def save_model_state(self, save_path):
+        """
+        Saves the model state to the specified directory.
+
+        Parameters:
+        -----------
+        save_path : str
+            Path to the directory where the model state will be saved.
+        """
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+
+        save_file = os.path.join(save_path, "model_state.pth")
+        torch.save(self.state_dict(), save_file)
+        print(f"Model state saved to {save_file}")
+    
+    def save_history_csv(self, history, save_path):
+        """
+        Saves the training history to a CSV file.
+
+        Parameters:
+        -----------
+        history : dict
+            Training history
+        save_path : str
+            Path to the directory where the CSV file will be saved.
+        """
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        df = pd.DataFrame(history)
+        save_file = os.path.join(save_path, "training_history.csv")
+        df.to_csv(save_file, index=False)
+        print(f"Training history saved to {save_file}")
