@@ -9,8 +9,8 @@ import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
 from datetime import datetime
 import os
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 class CNet2D(nn.Module):
     """
@@ -135,7 +135,7 @@ class CNet2D(nn.Module):
         else:
             return self.classifier(features, y)
     
-    def fit(self, X, y):
+    def fit(self, X, y, validation_split=0.2, patience=10, min_delta=0.001):
         """
         Fits the model to the input train data X and y
 
@@ -147,18 +147,32 @@ class CNet2D(nn.Module):
         # Trainingsmode
         self.train()
         X, y = X.to(self.device), y.to(self.device)
+        validation_size = int(validation_split * len(X))
+        training_size = len(X) - validation_size
 
-        # Load the data into the Tensorloader
+        train_X, val_X = torch.split(X, [training_size, validation_size])
+        train_y, val_y = torch.split(y, [training_size, validation_size])
+        # Define validation and test loader
         train_dataset = TensorDataset(X, y)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+
+        val_dataset = TensorDataset(val_X, val_y)
+        val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
+
         # Check which optimizer to use
         optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)(
             self.parameters(), lr=self.learning_rate
         )
         
+        # Variables for early stopping
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_model_state = None
+        
         # Keep track of the training history
         history = {
             "loss": [],
+            "val_loss": [],
             "epoch": []
         }
 
@@ -167,10 +181,8 @@ class CNet2D(nn.Module):
             # Go through the batches
             for batch_X, batch_y in train_loader:
                 optimizer.zero_grad()
-
                 if self.version in ["GLVQ", "GMLVQ"]:
                     loss = self(batch_X, batch_y)
-                    print(f"Batch Loss (GLVQ/GMLVQ): {loss.item():.4f}")
                 else:  # Softmax version
                     outputs = self(batch_X)
                     loss = F.nll_loss(outputs, batch_y)
@@ -178,12 +190,42 @@ class CNet2D(nn.Module):
                 loss.backward()
                 optimizer.step()
                 epoch_losses.append(loss.item())
+            
+            # Validation
+            self.eval()
+            val_losses = []
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    if self.version in ["GLVQ", "GMLVQ"]:
+                        val_loss = self(batch_X, batch_y)
+                    else:
+                        outputs = self(batch_X)
+                        val_loss = F.nll_loss(outputs, batch_y)
+                    val_losses.append(val_loss.item())
 
             avg_loss = np.mean(epoch_losses)
+            avg_val_loss = np.mean(val_losses)
+
             history["loss"].append(avg_loss)
             history["epoch"].append(epoch + 1)
+            history["val_loss"].append(avg_val_loss)
             
             print(f"Epoch {epoch + 1}/{self.epochs}, Loss: {avg_loss:.4f}")
+
+            # Early stopping check
+            if avg_val_loss < best_val_loss - min_delta:
+                best_val_loss = avg_val_loss
+                patience_counter = 0
+                best_model_state = self.state_dict()
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    print(f"Early stopping triggered at epoch {epoch + 1}")
+                    break
+    
+        # Load the best model
+        if best_model_state is not None:
+            self.load_state_dict(best_model_state)
 
         return history
                     
@@ -313,8 +355,8 @@ class CNet2D(nn.Module):
             predicted = self.predict(X)
         
         # Convert to numpy for sklearn metrics
-        y_true = y.cpu().numpy()
-        y_pred = predicted.cpu().numpy()
+        y_true = y.cpu().tolist()
+        y_pred = predicted.cpu().tolist()
         
         # Calculate accuracy
         accuracy = (predicted == y).float().mean()
@@ -393,3 +435,18 @@ class CNet2D(nn.Module):
         save_file = os.path.join(save_path, "training_history.csv")
         df.to_csv(save_file, index=False)
         print(f"Training history saved to {save_file}")
+
+
+    def load_model_state(self, path):
+        """
+        Loads in a state of the model.
+
+        Parameters:
+        -----------
+        path : str
+            Path to th directory where the pth file is.
+        """
+        if not os.path.exists(path):
+            os.makedirs(path)
+        self.load_state_dict(torch.load(path))
+        self.eval()
