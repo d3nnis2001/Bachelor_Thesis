@@ -224,22 +224,43 @@ class GMLVQ(GLVQ):
     """
     def __init__(self, input_dim, num_prototypes, num_classes, alpha=1.0):
         super(GMLVQ, self).__init__(input_dim, num_prototypes, num_classes, alpha)
-        # Learnable feature matrix (Omega.T @ Omega)
+
+        # Learnable feature matrix
         self.omega = nn.Parameter(torch.eye(input_dim))
 
+
     def compute_dist(self, x):
-            """
-            Overrides the distance computation to include the learnable metric transformation.
+        """
+        Compute distances using adaptive squared euclidian metric d_Λ(x,w) = (x-w)^T Λ (x-w).
 
-            Parameters:
-            -----------
-            x : torch.Tensor
-                Input data.
-            """
-            # Apply metric transformation
-            x_transformed = torch.matmul(x, self.omega.T)
-            prototypes_transformed = torch.matmul(self.prototypes, self.omega.T)
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input data.
+        """
+        # Apply metric transformation
+        x_transformed = torch.mm(x, self.omega.T)
+        prototypes_transformed = torch.mm(self.prototypes, self.omega.T)
 
-            # Compute squared Euclidean distance in transformed space
-            diff = x_transformed.unsqueeze(1) - prototypes_transformed.unsqueeze(0)
-            return torch.sum(diff ** 2, dim=2)
+        # Compute squared Euclidean distance in transformed space
+        diff = x_transformed.unsqueeze(1) - prototypes_transformed.unsqueeze(0)
+        return torch.sum(diff ** 2, dim=2)
+    
+    def normalize_metric(self):
+        """
+        Normalize metric tensor to maintain Tr(Λ) = 1 as per https://www.cs.rug.nl/~biehl/Preprints/gmlvq.pdf
+        """
+        with torch.no_grad():
+            lambda_matrix = torch.mm(self.omega.T, self.omega)
+            trace = torch.trace(lambda_matrix)
+            self.omega.data = self.omega.data / torch.sqrt(trace + 1e-10)
+
+    def forward(self, x, y):
+        """
+        Forward pass with metric normalization
+        """
+        loss = super().forward(x, y)
+        # Normalize metric
+        self.normalize_metric()
+
+        return loss
