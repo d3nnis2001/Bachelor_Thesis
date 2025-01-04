@@ -37,7 +37,7 @@ class CNet2D(nn.Module):
         Device to use for training. If None, the device is automatically selected based on availability.
     
     """
-    def __init__(self, version="GLVQ", num_prototypes_per_class=1, num_classes=8, epochs=5, optimizer_type="ADAM", learning_rate=0.001, batch_size=128, device=None):
+    def __init__(self, version="GLVQ", num_prototypes_per_class=1, num_classes=8, epochs=5, optimizer_type="ADAM", learning_rate=0.001, batch_size=128, device=None, dataset_type="NearLab"):
         super(CNet2D, self).__init__()
         # Parameters
         self.version = version
@@ -73,10 +73,15 @@ class CNet2D(nn.Module):
             nn.MaxPool2d((1, 2)),
             nn.Dropout(0.3)
         )
+
+        if dataset_type == "NinaPro":
+            flattened_size = 25600
+        elif dataset_type == "NearLab":
+            flattened_size = 40960
         
         # Dense layers
         self.dense_features = nn.Sequential(
-            nn.Linear(64 * 10 * 64, 300),
+            nn.Linear(flattened_size, 300),
             nn.BatchNorm1d(300),
             nn.RReLU(),
             nn.Dropout(0.3),
@@ -150,8 +155,8 @@ class CNet2D(nn.Module):
         validation_size = int(validation_split * len(X))
         training_size = len(X) - validation_size
 
-        train_X, val_X = torch.split(X, [training_size, validation_size])
-        train_y, val_y = torch.split(y, [training_size, validation_size])
+        _, val_X = torch.split(X, [training_size, validation_size])
+        _, val_y = torch.split(y, [training_size, validation_size])
         # Define validation and test loader
         train_dataset = TensorDataset(X, y)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
