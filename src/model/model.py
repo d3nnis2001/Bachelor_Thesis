@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from sklearn.model_selection import train_test_split
 from torch.utils.data import TensorDataset, DataLoader
 from model.layer import GLVQ, GMLVQ
 import matplotlib.pyplot as plt
@@ -51,29 +52,34 @@ class CNet2D(nn.Module):
         # Check if cuda available
         self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
+        if dataset_type == "NinaPro":
+            self.pool = nn.MaxPool2d((1, 3))
+        else:
+            self.pool = nn.MaxPool2d((1, 4))
+    
         self.feature_extractor = nn.Sequential(
             # Conv Block 1
             nn.Conv2d(1, 32, kernel_size=(3, 13), padding=(1, 6)),
             nn.BatchNorm2d(32),
             nn.RReLU(),
-            nn.MaxPool2d((1, 2)),
+            self.pool(),
             nn.Dropout(0.3),
             
             # Conv Block 2
             nn.Conv2d(32, 48, kernel_size=(3, 9), padding=(1, 4)),
             nn.BatchNorm2d(48),
             nn.RReLU(),
-            nn.MaxPool2d((1, 2)),
+            self.pool(),
             nn.Dropout(0.3),
             
             # Conv Block 3
             nn.Conv2d(48, 64, kernel_size=(3, 5), padding=(1, 2)),
             nn.BatchNorm2d(64),
             nn.RReLU(),
-            nn.MaxPool2d((1, 2)),
+            self.pool(),
             nn.Dropout(0.3)
         )
-
+        # TODO: Make this dynamic instead of hardcoded
         if dataset_type == "NinaPro":
             flattened_size = 49152
         elif dataset_type == "NearLab":
@@ -90,10 +96,15 @@ class CNet2D(nn.Module):
             nn.BatchNorm1d(50),
             nn.RReLU()
         )
+
         
         # Final classification layer
         if self.version == "Softmax":
-            self.classifier = nn.Linear(50, num_classes)
+            self.classifier = nn.Sequential(
+                nn.Linear(50, num_classes),
+                nn.Softmax(dim=1)
+            )
+            
             # GLVQ layer
         elif self.version == "GLVQ":
             self.classifier = GLVQ(50, self.num_prototypes_per_class, self.num_classes)
@@ -136,11 +147,11 @@ class CNet2D(nn.Module):
         features = self.extract_features(x)
         # Return the output based on the model version
         if self.version == "Softmax":
-            return F.log_softmax(self.classifier(features), dim=1)
+            return self.classifier(features)
         else:
             return self.classifier(features, y)
     
-    def fit(self, X, y, validation_split=0.2, patience=10, min_delta=0.001):
+    def fit(self, X, y, validation_split=0.2, patience=10):
         """
         Fits the model to the input train data X and y
 
@@ -148,19 +159,25 @@ class CNet2D(nn.Module):
         -----------
         X : torch.Tensor
             Input data
+        y : torch.Tensor
+            Target labels
+        validation_split : float
+            Fraction of the data to use for validation for early stopping
+        patience : int
+            Number of epochs to wait before early stopping
         """
         # Trainingsmode
         self.train()
         X, y = X.to(self.device), y.to(self.device)
-        validation_size = int(validation_split * len(X))
-        training_size = len(X) - validation_size
 
-        _, val_X = torch.split(X, [training_size, validation_size])
-        _, val_y = torch.split(y, [training_size, validation_size])
+        # Split the data into training and validation
+        _, val_X, _, val_y = train_test_split(
+            X.cpu().numpy(), y.cpu().numpy(), 
+            test_size=validation_split, shuffle=True, stratify=y.cpu().numpy()
+)
         # Define validation and test loader
         train_dataset = TensorDataset(X, y)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-
         val_dataset = TensorDataset(val_X, val_y)
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
 
@@ -168,6 +185,7 @@ class CNet2D(nn.Module):
         optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)(
             self.parameters(), lr=self.learning_rate
         )
+        criterion = nn.CrossEntropyLoss()
         
         # Variables for early stopping
         best_val_loss = float('inf')
@@ -175,11 +193,7 @@ class CNet2D(nn.Module):
         best_model_state = None
         
         # Keep track of the training history
-        history = {
-            "loss": [],
-            "val_loss": [],
-            "epoch": []
-        }
+        history = { "loss": [], "val_loss": [], "epoch": [] }
 
         for epoch in range(self.epochs):
             epoch_losses = []
@@ -187,10 +201,10 @@ class CNet2D(nn.Module):
             for batch_X, batch_y in train_loader:
                 optimizer.zero_grad()
                 if self.version in ["GLVQ", "GMLVQ"]:
-                    loss = self(batch_X, batch_y)
+                    loss = self(batch_X, batch_y, t_value = epoch)
                 else:  # Softmax version
                     outputs = self(batch_X)
-                    loss = F.nll_loss(outputs, batch_y)
+                    loss = criterion(outputs, batch_y)
 
                 loss.backward()
                 optimizer.step()
@@ -218,7 +232,7 @@ class CNet2D(nn.Module):
             print(f"Epoch {epoch + 1}/{self.epochs}, Loss: {avg_loss:.4f}")
 
             # Early stopping check
-            if avg_val_loss < best_val_loss - min_delta:
+            if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
                 patience_counter = 0
                 best_model_state = self.state_dict()
@@ -255,7 +269,7 @@ class CNet2D(nn.Module):
                 features = self.extract_features(X)
                 return self.classifier.predict(features)
             
-    def add_new_class(self, new_data, new_labels):
+    def add_new_class(self, new_data):
         """
         Adds a new class to the model
         
@@ -270,68 +284,74 @@ class CNet2D(nn.Module):
         """
         if self.version in ["GLVQ", "GMLVQ"]:
             with torch.no_grad():
-                self.num_classes += 1
                 new_data = new_data.to(self.device)
-                new_labels = new_labels.to(self.device)
                 # Extract features
                 features = self.extract_features(new_data)
                 # Calc mean of training data
                 class_mean = features.mean(dim=0)
                 # Repeat it incase we have multiple prototypes
                 prototype_features = class_mean.repeat(self.num_prototypes_per_class, 1)
-                prototype_labels = new_labels.repeat(self.num_prototypes_per_class)
+
+                new_class_index = self.classifier.num_classes
+
+                prototype_labels = torch.full(self.num_prototypes_per_class, new_class_index, dtype=torch.long, device=self.device)
                 # Adds the Prototype to the layer
                 self.classifier.add_prototypes(prototype_features, prototype_labels)
         else:
             # Incase you try to use it with the softmax version
             raise ValueError("Prototype addition is only supported for GLVQ or GMLVQ versions.")
         
-    def optimize_new_prototypes(self, new_data, new_labels, epochs=5):
+    def optimize_new_prototypes(self, new_data, epochs=5):
         """
-        Optimizes the new prototypes for few-shot learning
+        Optimizes the new prototypes for few-shot learning.
         
         Parameters:
         -----------
         new_data : torch.Tensor
-            Data of the new class
-        new_labels : torch.Tensor
-            Labels of the new class
+            Data of the new class.
         epochs : int
-            Number of optimization steps
+            Number of optimization steps.
         """
         if self.version in ["GLVQ", "GMLVQ"]:
             new_data = new_data.to(self.device)
-            new_labels = new_labels.to(self.device)
             
-            # Create optimizer for all prototypes
-            optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)([self.classifier.prototypes], lr=self.learning_rate)
-            # Create a temporary dataset and loader for batch processing
-            train_dataset = TensorDataset(new_data, new_labels)
-            train_loader = DataLoader(train_dataset, 
-                                    batch_size=min(32, len(new_data)), 
-                                    shuffle=True)
+            # Get the new class index
+            new_class_index = self.classifier.num_classes 
             
-            # Store original prototypes
-            with torch.no_grad():
-                original_prototypes = self.classifier.prototypes.clone()
-                start_idx = (self.num_classes - 1) * self.num_prototypes_per_class
+            # Select the new prototypes
+            new_prototypes_start = (new_class_index - 1) * self.num_prototypes_per_class
+            new_prototypes_end = new_class_index * self.num_prototypes_per_class
+            new_prototypes = self.classifier.prototypes[new_prototypes_start:new_prototypes_end]
             
+            # Create optimizer for the new prototypes only
+            optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)([new_prototypes], lr=self.learning_rate)
+            
+            train_labels = torch.full(
+                (new_data.size(0),), 
+                new_class_index, 
+                dtype=torch.long, 
+                device=self.device
+            )
+            train_dataset = TensorDataset(new_data, train_labels)
+            train_loader = DataLoader(
+                train_dataset, 
+                batch_size=min(32, len(new_data)), 
+                shuffle=True
+            )
+            # Train the new prototypes
             for epoch in range(epochs):
                 epoch_loss = 0
+                self.classifier.train()
                 for batch_X, batch_y in train_loader:
                     optimizer.zero_grad()
                     features = self.extract_features(batch_X)
-                    loss = self.classifier(features, batch_y)
+                    loss = self.classifier(features, batch_y, t_value=epoch)
                     loss.backward()
-                    
-                    # Only update new prototypes, reset old ones
-                    with torch.no_grad():
-                        self.classifier.prototypes.data[:start_idx] = original_prototypes[:start_idx].clone()
                     
                     optimizer.step()
                     epoch_loss += loss.item()
                 
-                print(f"FSL Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}")
+                print(f"FSL Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}")
         else:
             raise ValueError("Prototype optimization is only supported for GLVQ or GMLVQ versions.")
             

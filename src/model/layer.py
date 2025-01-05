@@ -31,12 +31,11 @@ class GLVQ(nn.Module):
         self.prototypes = nn.Parameter(torch.empty(self.num_prototypes, input_dim))
 
         # Prototype label
-        self.prototype_labels = nn.Parameter(torch.tensor([i % num_classes for i in range(self.num_prototypes)]),
-                                             requires_grad=False)
+        self.prototype_labels = nn.Parameter(torch.tensor([i // num_prototypes_per_class for i in range(self.num_prototypes)]), requires_grad=False)
         
         self.initialized = False
     
-    def forward(self, x, y):
+    def forward(self, x, y, t_value):
         """
         Forward pass through the GLVQ layer.
 
@@ -52,7 +51,7 @@ class GLVQ(nn.Module):
         dist = self.compute_dist(x)
         d1, d2 = self.prototype_dist(dist, y)
         mu = self.mu(d1, d2)
-        loss = self.compute_loss(mu)
+        loss = self.compute_loss(mu, t_value)
         return loss
     
     def prototype_dist(self, dist, y):
@@ -144,7 +143,7 @@ class GLVQ(nn.Module):
         epsilon = 1e-9
         return (d1-d2)/(d1+d2 + epsilon)
     
-    def compute_loss(self, mu):
+    def compute_loss(self, mu, t_value):
         """
         Computes the GLVQ loss using the sigmoid function.
 
@@ -153,7 +152,9 @@ class GLVQ(nn.Module):
         mu : torch.Tensor
             Difference between the distances to the correct and incorrect prototypes.
         """
-        f_mu = torch.sigmoid(self.alpha * mu)
+        # Learning time
+        alpha = self.alpha / (1 + 0.01 * t_value)
+        f_mu = torch.sigmoid(alpha * mu)
         return torch.mean(f_mu)
 
 
@@ -186,7 +187,7 @@ class GLVQ(nn.Module):
             Labels for the new prototypes.
         """
         self.num_classes += 1
-        self.num_prototypes += 1 * self.num_prototypes_per_class
+        self.num_prototypes += self.num_prototypes_per_class
         new_prototypes = new_prototypes.to(self.prototypes.device)
         new_labels = new_labels.to(self.prototype_labels.device)
         # Concatenate the new prototypes and labels with existing ones
@@ -255,11 +256,11 @@ class GMLVQ(GLVQ):
             trace = torch.trace(lambda_matrix)
             self.omega.data = self.omega.data / torch.sqrt(trace + 1e-10)
 
-    def forward(self, x, y):
+    def forward(self, x, y, t_value):
         """
         Forward pass with metric normalization
         """
-        loss = super().forward(x, y)
+        loss = super().forward(x, y, t_value)
         # Normalize metric
         self.normalize_metric()
 
