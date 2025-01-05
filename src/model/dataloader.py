@@ -169,6 +169,10 @@ class NinaProDatasetLoader:
             raise ValueError("Database must be 1 or 2")
             
         rep_ids = np.unique(data["rep"])
+
+        emg_data = data['emg']
+        print("Shape of EMG data:", emg_data.shape)
+
         rep_ids = rep_ids[rep_ids > 0]
         
         # Split into train test set
@@ -224,6 +228,9 @@ class NinaProDatasetLoader:
         y_train = torch.LongTensor(y_train)
         X_test = torch.FloatTensor(X_test).squeeze(-1)
         y_test = torch.LongTensor(y_test)
+        # Permutate the data to (n_samples, n_channels, n_timepoints)
+        X_train = X_train.permute(0, 2, 1)
+        X_test = X_test.permute(0, 2, 1)
         
         return X_train, y_train, X_test, y_test
     

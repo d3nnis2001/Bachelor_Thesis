@@ -75,7 +75,7 @@ class CNet2D(nn.Module):
         )
 
         if dataset_type == "NinaPro":
-            flattened_size = 25600
+            flattened_size = 49152
         elif dataset_type == "NearLab":
             flattened_size = 40960
         
