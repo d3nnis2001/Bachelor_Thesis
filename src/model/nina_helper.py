@@ -105,21 +105,12 @@ def import_db2(folder_path, subject, rest_length_cap=5):
     """
     fs = 2000
 
-    data = sio.loadmat(folder_path + 'S' + str(subject) + '_E1_A1.mat')
-    emg = np.squeeze(np.array(data['emg']))
-    rep = np.squeeze(np.array(data['rerepetition']))
-    move = np.squeeze(np.array(data['restimulus']))
 
     data = sio.loadmat(folder_path + '/S' + str(subject) + '_E2_A1.mat')
-    emg = np.vstack((emg, np.array(data['emg'])))
-    rep = np.append(rep, np.squeeze(np.array(data['rerepetition'])))
+    emg = np.squeeze(np.array(data['emg']))
+    rep = np.squeeze(np.array(data['rerepetition']))
     move_tmp = np.squeeze(np.array(data['restimulus']))
-    move = np.append(move, move_tmp)  # Note no fix needed for this exercise
-
-    data = sio.loadmat(folder_path + '/S' + str(subject) + '_E3_A1.mat')
-    emg = np.vstack((emg, np.array(data['emg'])))
-    data['repetition'][-1] = 0  # Fix for diffing
-    rep = np.append(rep, np.squeeze(np.array(data['repetition'])))
+    move = np.squeeze(np.array(data['restimulus']))
 
     # Movements number in non-logical pattern [0  1  2  4  6  8  9 16 32 40]
     data['stimulus'][-1] = 0  # Fix for diffing

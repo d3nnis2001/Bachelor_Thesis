@@ -302,8 +302,19 @@ class CNet2D(nn.Module):
                 # Adds the Prototype to the layer
                 self.classifier.add_prototypes(prototype_features, prototype_labels)
         else:
-            # Incase you try to use it with the softmax version
-            raise ValueError("Prototype addition is only supported for GLVQ or GMLVQ versions.")
+            with torch.no_grad():
+                # Get the new class index
+                new_class_index = self.classifier.num_classes
+                # Get the number of features
+                num_features = self.classifier.weight.size(1)
+                # Initialize new weights and bias
+                new_weights = torch.randn(1, num_features, device=self.device) * 0.01
+                new_bias = torch.zeros(1, device=self.device)
+                # Concatenate the new weights and bias with the existing ones
+                self.classifier.weight = torch.nn.Parameter(torch.cat([self.classifier.weight, new_weights], dim=0))
+                self.classifier.bias = torch.nn.Parameter(torch.cat([self.classifier.bias, new_bias], dim=0))
+                # Update the number of classes
+                self.classifier.num_classes += 1
         
     def optimize_new_prototypes(self, new_data, epochs=5):
         """
@@ -357,7 +368,35 @@ class CNet2D(nn.Module):
                 
                 print(f"FSL Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}")
         else:
-            raise ValueError("Prototype optimization is only supported for GLVQ or GMLVQ versions.")
+            # Optimizer
+            optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)(self.parameters(), lr=self.learning_rate)
+            # Set training labels to the new class
+            train_labels = torch.full(
+                (new_data.size(0),), 
+                self.classifier.num_classes - 1, 
+                dtype=torch.long, 
+                device=self.device
+            )
+            # New data and labels
+            train_dataset = TensorDataset(new_data, train_labels)
+            train_loader = DataLoader(
+                train_dataset, 
+                batch_size=min(32, len(new_data)), 
+                shuffle=True
+            )
+            # Optimize the new class
+            for epoch in range(epochs):
+                epoch_loss = 0
+                self.train()
+                for batch_X, batch_y in train_loader:
+                    optimizer.zero_grad()
+                    predictions = self(batch_X)
+                    loss = torch.nn.functional.cross_entropy(predictions, batch_y)
+                    loss.backward()
+                    optimizer.step()
+                    epoch_loss += loss.item()
+
+                print(f"Softmax FSL Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}")
             
     def evaluate_model(self, X, y, conf_matrix=True, sub_acc=True):
         """
