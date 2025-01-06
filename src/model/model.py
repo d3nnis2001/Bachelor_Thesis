@@ -10,7 +10,6 @@ import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
 from datetime import datetime
 import os
-import numpy as np
 import pandas as pd
 
 class CNet2D(nn.Module):
@@ -62,28 +61,28 @@ class CNet2D(nn.Module):
             nn.Conv2d(1, 32, kernel_size=(3, 13), padding=(1, 6)),
             nn.BatchNorm2d(32),
             nn.RReLU(),
-            self.pool(),
+            self.pool,
             nn.Dropout(0.3),
             
             # Conv Block 2
             nn.Conv2d(32, 48, kernel_size=(3, 9), padding=(1, 4)),
             nn.BatchNorm2d(48),
             nn.RReLU(),
-            self.pool(),
+            self.pool,
             nn.Dropout(0.3),
             
             # Conv Block 3
             nn.Conv2d(48, 64, kernel_size=(3, 5), padding=(1, 2)),
             nn.BatchNorm2d(64),
             nn.RReLU(),
-            self.pool(),
+            self.pool,
             nn.Dropout(0.3)
         )
         # TODO: Make this dynamic instead of hardcoded
         if dataset_type == "NinaPro":
-            flattened_size = 49152
+            flattened_size = 5120
         elif dataset_type == "NearLab":
-            flattened_size = 40960
+            flattened_size = 5120
         
         # Dense layers
         self.dense_features = nn.Sequential(
@@ -94,16 +93,15 @@ class CNet2D(nn.Module):
             
             nn.Linear(300, 50),
             nn.BatchNorm1d(50),
-            nn.RReLU()
+            nn.RReLU(),
         )
 
         
         # Final classification layer
         if self.version == "Softmax":
-            self.classifier = nn.Sequential(
-                nn.Linear(50, num_classes),
-                nn.Softmax(dim=1)
-            )
+            nn.Linear(50, num_classes)
+            self.classifier = nn.Softmax(dim=1)
+
             
             # GLVQ layer
         elif self.version == "GLVQ":
@@ -129,7 +127,7 @@ class CNet2D(nn.Module):
         features = self.dense_features(x)
         return features
     
-    def forward(self, x, y=None):
+    def forward(self, x, y=None, t_value=None):
         """
         Forward pass through the network
 
@@ -149,9 +147,9 @@ class CNet2D(nn.Module):
         if self.version == "Softmax":
             return self.classifier(features)
         else:
-            return self.classifier(features, y)
+            return self.classifier(features, y, t_value)
     
-    def fit(self, X, y, validation_split=0.2, patience=10):
+    def fit(self, X, y, patience=10, X_val = None, y_val = None):
         """
         Fits the model to the input train data X and y
 
@@ -166,19 +164,14 @@ class CNet2D(nn.Module):
         patience : int
             Number of epochs to wait before early stopping
         """
-        # Trainingsmode
-        self.train()
         X, y = X.to(self.device), y.to(self.device)
 
-        # Split the data into training and validation
-        _, val_X, _, val_y = train_test_split(
-            X.cpu().numpy(), y.cpu().numpy(), 
-            test_size=validation_split, shuffle=True, stratify=y.cpu().numpy()
-)
+        X_val, y_val = X_val.to(self.device), y_val.to(self.device)
+
         # Define validation and test loader
         train_dataset = TensorDataset(X, y)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        val_dataset = TensorDataset(val_X, val_y)
+        val_dataset = TensorDataset(X_val, y_val)
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
 
         # Check which optimizer to use
@@ -196,46 +189,57 @@ class CNet2D(nn.Module):
         history = { "loss": [], "val_loss": [], "epoch": [] }
 
         for epoch in range(self.epochs):
+            self.train()
+            running_loss = 0
             epoch_losses = []
             # Go through the batches
             for batch_X, batch_y in train_loader:
                 optimizer.zero_grad()
                 if self.version in ["GLVQ", "GMLVQ"]:
-                    loss = self(batch_X, batch_y, t_value = epoch)
+                    loss = self.forward(batch_X, batch_y, t_value = epoch)
                 else:  # Softmax version
-                    outputs = self(batch_X)
+                    outputs = self.forward(batch_X)
                     loss = criterion(outputs, batch_y)
-
                 loss.backward()
                 optimizer.step()
-                epoch_losses.append(loss.item())
+                running_loss += loss.item() * batch_X.size(0)
+            epoch_loss = running_loss / len(train_loader.dataset)
+            epoch_losses.append(epoch_loss)
             
             # Validation
             self.eval()
             val_losses = []
+            val_loss = 0
             with torch.no_grad():
                 for batch_X, batch_y in val_loader:
                     if self.version in ["GLVQ", "GMLVQ"]:
-                        val_loss = self(batch_X, batch_y)
+                        val_loss = self.forward(batch_X, batch_y, t_value = epoch)
                     else:
-                        outputs = self(batch_X)
-                        val_loss = F.nll_loss(outputs, batch_y)
+                        outputs = self.forward(batch_X)
+                        val_loss = criterion(outputs, batch_y)
                     val_losses.append(val_loss.item())
+                    val_loss += loss.item() * batch_X.size(0)
+                val_loss = val_loss / len(val_loader)
+                val_losses.append(val_loss)
+            # Used torch to mean the loss since I had problems with numpy
+            te = torch.tensor(epoch_losses, device=self.device)
+            tv = torch.tensor(val_losses, device=self.device)
 
-            avg_loss = np.mean(epoch_losses)
-            avg_val_loss = np.mean(val_losses)
+            avg_loss = torch.mean(te)
+            avg_val_loss = torch.mean(tv)
 
             history["loss"].append(avg_loss)
             history["epoch"].append(epoch + 1)
             history["val_loss"].append(avg_val_loss)
             
             print(f"Epoch {epoch + 1}/{self.epochs}, Loss: {avg_loss:.4f}")
+            print(f"Validation loss: {avg_val_loss}")
 
             # Early stopping check
-            if avg_val_loss < best_val_loss:
-                best_val_loss = avg_val_loss
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
                 patience_counter = 0
-                best_model_state = self.state_dict()
+                torch.save(self.state_dict(), "best_model.pth")
             else:
                 patience_counter += 1
                 if patience_counter >= patience:

@@ -143,7 +143,7 @@ class GLVQ(nn.Module):
         epsilon = 1e-9
         return (d1-d2)/(d1+d2 + epsilon)
     
-    def compute_loss(self, mu, t_value):
+    def compute_loss(self, mu, t_value=1):
         """
         Computes the GLVQ loss using the sigmoid function.
 

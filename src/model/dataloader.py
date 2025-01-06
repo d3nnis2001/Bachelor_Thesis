@@ -2,6 +2,7 @@ from model.utils import preprocess, to_tensors, list_files
 import pandas as pd
 import numpy as np
 import torch
+from sklearn.model_selection import train_test_split
 from scipy.io import loadmat
 from scipy import signal
 import os 
@@ -37,6 +38,8 @@ class NearlabDatasetLoader:
         repetitions = data.iloc[:, 5121].values
         y = y - 1
         X = preprocess(X)
+        X, y = shuffle(X, y, random_state=39)
+        
         return X, y, repetitions
     
     def split_by_file(self):
@@ -61,11 +64,14 @@ class NearlabDatasetLoader:
         y_train = np.concatenate(y_train_list, axis=0)
         X_test = np.concatenate(X_test_list, axis=0)
         y_test = np.concatenate(y_test_list, axis=0)
+
+        X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=39, shuffle=True)
         
         # Convert into pytorch tensors for the model
         X_train, y_train = to_tensors(X_train, y_train)
+        X_val, y_val = to_tensors(X_val, y_val)
         X_test, y_test = to_tensors(X_test, y_test)
-        return X_train, y_train, X_test, y_test
+        return X_train, y_train, X_val, y_val, X_test, y_test
 
     def split_data_by_repetitions(self):
         """
@@ -110,6 +116,8 @@ class NearlabDatasetLoader:
         y_train = np.concatenate(y_train_list, axis=0)
         X_test = np.concatenate(X_test_list, axis=0)
         y_test = np.concatenate(y_test_list, axis=0)
+
+        X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=39, shuffle=True)
         
         # Shuffle the data
         X_train, y_train = shuffle(X_train, y_train, random_state=66)
@@ -117,8 +125,9 @@ class NearlabDatasetLoader:
         
         X_train, y_train = to_tensors(X_train, y_train)
         X_test, y_test = to_tensors(X_test, y_test)
+        X_val, y_val = to_tensors(X_val, y_val)
         
-        return X_train, y_train, X_test, y_test
+        return X_train, y_train, X_val, y_val, X_test, y_test
 
 class NinaProDatasetLoader:
     """
