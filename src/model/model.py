@@ -95,8 +95,6 @@ class CNet2D(nn.Module):
             nn.BatchNorm1d(50),
             nn.RReLU(),
         )
-
-        
         # Final classification layer
         if self.version == "Softmax":
             nn.Linear(50, num_classes)
@@ -150,6 +148,7 @@ class CNet2D(nn.Module):
             return self.classifier(features, y, t_value)
     
     def fit(self, X, y, patience=10, X_val = None, y_val = None):
+        # TODO: Implement Learning rate scheduler maybe? With decreasing learning rate from 0.0002 to 0.00005
         """
         Fits the model to the input train data X and y
 
@@ -159,15 +158,16 @@ class CNet2D(nn.Module):
             Input data
         y : torch.Tensor
             Target labels
-        validation_split : float
-            Fraction of the data to use for validation for early stopping
         patience : int
             Number of epochs to wait before early stopping
+        X_val : torch.Tensor
+            Validation data
+        y_val : torch.Tensor
+            Validation labels
         """
         X, y = X.to(self.device), y.to(self.device)
 
         X_val, y_val = X_val.to(self.device), y_val.to(self.device)
-
         # Define validation and test loader
         train_dataset = TensorDataset(X, y)
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
@@ -175,13 +175,11 @@ class CNet2D(nn.Module):
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size)
 
         # Check which optimizer to use
-        optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)(
-            self.parameters(), lr=self.learning_rate
-        )
+        optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)(self.parameters(), lr=self.learning_rate)
         criterion = nn.CrossEntropyLoss()
         
         # Variables for early stopping
-        best_val_loss = float('inf')
+        best_val_loss = float("inf")
         patience_counter = 0
         best_model_state = None
         
@@ -398,7 +396,7 @@ class CNet2D(nn.Module):
 
                 print(f"Softmax FSL Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}")
             
-    def evaluate_model(self, X, y, conf_matrix=True, sub_acc=True):
+    def evaluate_model(self, X, y, conf_matrix=False, sub_acc=False):
         """
         Evaluates the model with multiple metrics.
         

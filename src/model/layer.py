@@ -33,6 +33,7 @@ class GLVQ(nn.Module):
         # Prototype label
         self.prototype_labels = nn.Parameter(torch.tensor([i // num_prototypes_per_class for i in range(self.num_prototypes)]), requires_grad=False)
         
+        # Variable so initialization is only done once
         self.initialized = False
     
     def forward(self, x, y, t_value):
@@ -77,6 +78,7 @@ class GLVQ(nn.Module):
         return d1, d2
     
     def initialize_prototypes(self, X, y):
+        # TODO: Maybe implement a small shift of mean
         """
         Initializes the prototypes based on the class mean.
 
@@ -152,8 +154,8 @@ class GLVQ(nn.Module):
         mu : torch.Tensor
             Difference between the distances to the correct and incorrect prototypes.
         """
-        # Learning time
-        alpha = self.alpha / (1 + 0.01 * t_value)
+        # Alpha scaling with epochs
+        alpha =  torch.log(1 + t_value) / self.alpha
         f_mu = torch.sigmoid(alpha * mu)
         return torch.mean(f_mu)
 
@@ -259,6 +261,15 @@ class GMLVQ(GLVQ):
     def forward(self, x, y, t_value):
         """
         Forward pass with metric normalization
+
+        Parameters:
+        -----------
+        x : torch.Tensor
+            Input data
+        y : torch.Tensor
+            Target labels
+        t_value : int
+            Time value for loss function.
         """
         loss = super().forward(x, y, t_value)
         # Normalize metric

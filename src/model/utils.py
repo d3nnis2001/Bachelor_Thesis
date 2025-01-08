@@ -52,3 +52,27 @@ def list_files(directory, fileformat):
             if file.endswith(fileformat):
                 found_files.append(os.path.join(root, file).replace("\\", "/"))
     return found_files
+
+def take_n_shots(X, y, n_shots, y_target):
+    """
+    Take n_shots from the target class.
+
+    Parameters:
+    -----------
+    X : numpy.ndarray
+        Input data
+    y : numpy.ndarray
+        Target labels
+    n_shots : int
+        Number of shots to take
+    y_target : int
+        Target class
+    """
+    mask = y == y_target
+    X_target = X[mask]
+    y_target = y[mask]
+    # Select n_shots from the target class randomly
+    mask_shots = np.random.choice(len(X_target), n_shots, replace=False)
+    X_shots = X_target[mask_shots]
+    y_shots = y_target[mask_shots]
+    return X_shots, y_shots

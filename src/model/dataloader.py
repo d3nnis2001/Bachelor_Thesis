@@ -30,6 +30,10 @@ class NearlabDatasetLoader:
             return self.split_by_file()
         elif split_method == "repetition_wise":
             return self.split_data_by_repetitions()
+        elif split_method == "few-shot-learning":
+            return self.split_few_shot_learning()
+        else:
+            raise ValueError("Split does not exist")
 
     def _read_in_file(self, filepath):
         data = pd.read_csv(filepath, header=None, skiprows=[0])
@@ -37,6 +41,23 @@ class NearlabDatasetLoader:
         y = data.iloc[:, 5120].values
         repetitions = data.iloc[:, 5121].values
         y = y - 1
+        X = preprocess(X)
+        X, y = shuffle(X, y, random_state=39)
+        
+        return X, y, repetitions
+
+    def _read_in_combo_file(self, filepath):
+        data = pd.read_csv(filepath, header=None, skiprows=[0])
+        X = data.iloc[:, :5120].values
+        y = data.iloc[:, 5120].values
+        y2 = data.iloc[:, 5121].values
+        repetitions = data.iloc[:, 5122].values
+        start = 9
+        for i in range(6, 9):
+            for j in range(3, 5):
+                y = np.where((y == i) & (y2 == j), start, y)
+                start += 1
+        
         X = preprocess(X)
         X, y = shuffle(X, y, random_state=39)
         
@@ -119,15 +140,50 @@ class NearlabDatasetLoader:
 
         X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=39, shuffle=True)
         
-        # Shuffle the data
-        X_train, y_train = shuffle(X_train, y_train, random_state=66)
-        X_test, y_test = shuffle(X_test, y_test, random_state=66)
-        
         X_train, y_train = to_tensors(X_train, y_train)
         X_test, y_test = to_tensors(X_test, y_test)
         X_val, y_val = to_tensors(X_val, y_val)
         
         return X_train, y_train, X_val, y_val, X_test, y_test
+    
+    def split_few_shot_learning(self):
+        """
+        Amount of shots to use for few shot learning in the test set
+
+        Parameters:
+        ----------
+        n_shots : int
+            Number of shots to use for few shot learning
+        """
+        X_train_list, y_train_list = [], []
+        X_test_list, y_test_list = [], []
+
+        for train_file in self.train_paths:
+            X_train, y_train, _ = self._read_in_file(train_file)
+            X_train_list.append(X_train)
+            y_train_list.append(y_train)
+        
+        for test_file in self.test_paths:
+            X_test, y_test, _ = self._read_in_combo_file(test_file)
+            X_test_list.append(X_test)
+            y_test_list.append(y_test)
+
+        X_train = np.concatenate(X_train_list, axis=0)
+        y_train = np.concatenate(y_train_list, axis=0)
+        X_test = np.concatenate(X_test_list, axis=0)
+        y_test = np.concatenate(y_test_list, axis=0)
+
+        X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=39, shuffle=True)
+        
+        # Convert into pytorch tensors for the model
+        X_train, y_train = to_tensors(X_train, y_train)
+        X_val, y_val = to_tensors(X_val, y_val)
+        X_test, y_test = to_tensors(X_test, y_test)
+        return X_train, y_train, X_val, y_val, X_test, y_test
+
+
+        
+
 
 class NinaProDatasetLoader:
     """
@@ -148,7 +204,7 @@ class NinaProDatasetLoader:
     rest_length_cap : int, optional
         Number of seconds of rest data to keep before/after movement (default: 5)
     """
-    def __init__(self, folder_path, subject, database, window_length, window_increment, rest_length_cap = 5):
+    def __init__(self, folder_path, subject, database, window_length=512, window_increment=128, rest_length_cap = 5):
         
         self.folder_path = folder_path
         self.subject = subject
@@ -179,8 +235,7 @@ class NinaProDatasetLoader:
             
         rep_ids = np.unique(data["rep"])
 
-        emg_data = data['emg']
-        print("Shape of EMG data:", emg_data.shape)
+        emg_data = data["emg"]
 
         rep_ids = rep_ids[rep_ids > 0]
         
@@ -190,7 +245,7 @@ class NinaProDatasetLoader:
         elif split_method == "balanced":
             train_reps, test_reps = gen_split_balanced(rep_ids, test_reps, base=[2, 5])
         else:
-            raise ValueError("Split not included")
+            raise ValueError("Split does not exist")
             
         # Use first split if multiple were generated
         train_reps = train_reps[0]
