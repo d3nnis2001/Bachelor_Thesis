@@ -235,8 +235,6 @@ class NinaProDatasetLoader:
             
         rep_ids = np.unique(data["rep"])
 
-        emg_data = data["emg"]
-
         rep_ids = rep_ids[rep_ids > 0]
         
         # Split into train test set
@@ -297,6 +295,61 @@ class NinaProDatasetLoader:
         X_test = X_test.permute(0, 2, 1)
         
         return X_train, y_train, X_test, y_test
+    
+    def load_few_shot_learning_data(self):
+        """
+        Load and preprocess the NinaPro dataset for few-shot learning.
+        It takes Exercise B and C as training data and Exercise D as testing data.
+        """
+        if self.database == 1:
+            data = import_db1(self.folder_path, self.subject, self.rest_length_cap)
+        elif self.database == 2:
+            data = import_db2(self.folder_path, self.subject, self.rest_length_cap)
+        else:
+            raise ValueError("Database must be 1 or 2")
+        # Normalize data
+        normalized_emg = normalise_emg(data["emg"], data["rep"], np.unique(data["rep"]))
+
+        # Convert to Dataframe for the filter function
+        emg_df = pd.DataFrame(normalized_emg, columns=[f"channel_{i+1}" for i in range(normalized_emg.shape[1])])
+        emg_df["stimulus"] = data["move"]
+        emg_df["repetition"] = data["rep"]
+
+        filtered_emg = self.filter_data(emg_df, f=(10, 450), butterworth_order=4, btype="bandpass")
+        emg_filtered = filtered_emg.values[:, :12]
+        
+        # Get all windows
+        X_all, y_all, _ = get_windows(
+            np.unique(data["rep"]),
+            self.window_length,
+            self.window_increment,
+            emg_filtered,
+            data["move"],
+            data["rep"]
+        )
+        
+        # Split by class for FSL (0 is excluded as it is rest and influences the overall performance significantly)
+        mask_train = (y_all > 0) & (y_all < 41)
+        mask_test = (y_all >= 41) & (y_all < 50)
+        X_train, y_train = X_all[mask_train], y_all[mask_train]
+        X_test, y_test = X_all[mask_test], y_all[mask_test]
+        
+        # Shuffle the data
+        X_train, y_train = shuffle(X_train, y_train, random_state=39)
+        X_test, y_test = shuffle(X_test, y_test, random_state=39)
+        
+        # Convert to PyTorch tensors
+        X_train = torch.FloatTensor(X_train).squeeze(-1)
+        y_train = torch.LongTensor(y_train)
+        X_test = torch.FloatTensor(X_test).squeeze(-1)
+        y_test = torch.LongTensor(y_test)
+
+        # Permutate the data into the correct shape
+        X_train = X_train.permute(0, 2, 1)
+        X_test = X_test.permute(0, 2, 1)
+        
+        return X_train, y_train, X_test, y_test
+
     
     # from https://github.com/parasgulati8/NinaPro-Helper-Library/blob/master/NinaPro_Utility.py
     def filter_data(self, data, f, butterworth_order = 4, btype = "lowpass"):
