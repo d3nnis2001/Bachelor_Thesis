@@ -78,7 +78,6 @@ class GLVQ(nn.Module):
         return d1, d2
     
     def initialize_prototypes(self, X, y):
-        # TODO: Maybe implement a small shift of mean
         """
         Initializes the prototypes based on the class mean.
 
@@ -102,9 +101,12 @@ class GLVQ(nn.Module):
             # Check if class has samples
             if len(class_samples) == 0:
                 continue
-
+            
             # Calc mean of the class samples
             class_mean = class_samples.mean(dim=0)
+
+            shift = torch.randn_like(class_mean) * 0.01
+            class_mean = class_mean + shift
 
             # Do it for each prototype per class
             class_protos = class_mean.repeat(self.num_prototypes_per_class, 1)

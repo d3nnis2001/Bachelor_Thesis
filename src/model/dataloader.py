@@ -225,6 +225,9 @@ class NinaProDatasetLoader:
             Number of repetitions to use for testing
         
         """
+        info = db2_info()
+        reps = info["rep_labels"]
+
         # Load in Ninapro data based on database
         if self.database == 1:
             data = import_db1(self.folder_path, self.subject, self.rest_length_cap)
@@ -233,15 +236,12 @@ class NinaProDatasetLoader:
         else:
             raise ValueError("Database must be 1 or 2")
             
-        rep_ids = np.unique(data["rep"])
-
-        rep_ids = rep_ids[rep_ids > 0]
         
         # Split into train test set
         if split_method == "repetition_wise":
-            train_reps, test_reps = gen_split_rand(rep_ids, test_reps, 12, base=[2, 5])
+            train_reps, test_reps = gen_split_rand(reps, test_reps, 12, base=[2, 5])
         elif split_method == "balanced":
-            train_reps, test_reps = gen_split_balanced(rep_ids, test_reps, base=[2, 5])
+            train_reps, test_reps = gen_split_balanced(reps, test_reps, base=[2, 5])
         else:
             raise ValueError("Split does not exist")
             
@@ -301,17 +301,22 @@ class NinaProDatasetLoader:
         Load and preprocess the NinaPro dataset for few-shot learning.
         It takes Exercise B and C as training data and Exercise D as testing data.
         """
+
+        info = db2_info()
+        reps = info["rep_labels"]
+
         if self.database == 1:
             data = import_db1(self.folder_path, self.subject, self.rest_length_cap)
         elif self.database == 2:
             data = import_db2(self.folder_path, self.subject, self.rest_length_cap)
         else:
             raise ValueError("Database must be 1 or 2")
+        
         # Normalize data
-        normalized_emg = normalise_emg(data["emg"], data["rep"], np.unique(data["rep"]))
-
+        normalized_emg = normalise_emg(data["emg"], data["rep"], reps)
         # Convert to Dataframe for the filter function
         emg_df = pd.DataFrame(normalized_emg, columns=[f"channel_{i+1}" for i in range(normalized_emg.shape[1])])
+
         emg_df["stimulus"] = data["move"]
         emg_df["repetition"] = data["rep"]
 
