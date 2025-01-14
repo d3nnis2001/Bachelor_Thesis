@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 
 class GLVQ(nn.Module):
@@ -46,6 +47,8 @@ class GLVQ(nn.Module):
             Input data
         y : torch.Tensor
             Target labels
+        t_value : int
+            Time value for the loss function.
         """
         if not self.initialized:
             self.initialize_prototypes(x, y)
@@ -65,7 +68,6 @@ class GLVQ(nn.Module):
             Distance matrix between input and prototypes.
         y : torch.Tensor
             Target labels.
-
         """
         # Mask for correct and incorrect prototypes
         correct_mask = self.prototype_labels.unsqueeze(0) == y.unsqueeze(1)
@@ -155,9 +157,11 @@ class GLVQ(nn.Module):
         -----------
         mu : torch.Tensor
             Difference between the distances to the correct and incorrect prototypes.
+        t_value : int
+            Time value for the loss
         """
         # Alpha scaling with epochs
-        alpha =  torch.log(1 + t_value) / self.alpha
+        alpha = math.log(1 + t_value) / self.alpha
         f_mu = torch.sigmoid(alpha * mu)
         return torch.mean(f_mu)
 
@@ -197,6 +201,7 @@ class GLVQ(nn.Module):
         # Concatenate the new prototypes and labels with existing ones
         self.prototypes = nn.Parameter(torch.cat([self.prototypes, new_prototypes], dim=0))
         self.prototype_labels = nn.Parameter(torch.cat([self.prototype_labels, new_labels]), requires_grad=False)
+        print(f"Added {self.num_prototypes_per_class} new prototypes for class {self.num_classes - 1}")
 
     # Getter and Setter
     def get_prototypes(self):

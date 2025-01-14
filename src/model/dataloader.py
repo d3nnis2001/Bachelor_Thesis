@@ -1,6 +1,5 @@
 from model.utils import preprocess, to_tensors, list_files
 import pandas as pd
-import numpy as np
 import torch
 from sklearn.model_selection import train_test_split
 from scipy.io import loadmat
@@ -148,12 +147,7 @@ class NearlabDatasetLoader:
     
     def split_few_shot_learning(self):
         """
-        Amount of shots to use for few shot learning in the test set
-
-        Parameters:
-        ----------
-        n_shots : int
-            Number of shots to use for few shot learning
+        Split of basic and combo movement for FSL
         """
         X_train_list, y_train_list = [], []
         X_test_list, y_test_list = [], []
@@ -227,7 +221,6 @@ class NinaProDatasetLoader:
         """
         info = db2_info()
         reps = info["rep_labels"]
-
         # Load in Ninapro data based on database
         if self.database == 1:
             data = import_db1(self.folder_path, self.subject, self.rest_length_cap)
@@ -235,8 +228,13 @@ class NinaProDatasetLoader:
             data = import_db2(self.folder_path, self.subject, self.rest_length_cap)
         else:
             raise ValueError("Database must be 1 or 2")
-            
         
+        # Remove the resting movement
+        mask = data["move"] != 0
+        data["emg"] = data["emg"][mask]
+        data["move"] = data["move"][mask]
+        data["rep"] = data["rep"][mask]
+            
         # Split into train test set
         if split_method == "repetition_wise":
             train_reps, test_reps = gen_split_rand(reps, test_reps, 12, base=[2, 5])
@@ -245,10 +243,10 @@ class NinaProDatasetLoader:
         else:
             raise ValueError("Split does not exist")
             
+            
         # Use first split if multiple were generated
         train_reps = train_reps[0]
         test_reps = test_reps[0]
-        
         # Normalize data
         normalized_emg = normalise_emg(data["emg"], data["rep"], train_reps)
 
@@ -258,9 +256,7 @@ class NinaProDatasetLoader:
         emg_df["repetition"] = data["rep"]
 
         filtered_emg = self.filter_data(emg_df, f=(10, 450), butterworth_order=4, btype="bandpass")
-
         emg_filtered = filtered_emg.values[:, :12]
-        
         # Get windowed data for training set
         X_train, y_train, _ = get_windows(
             train_reps,
@@ -270,6 +266,11 @@ class NinaProDatasetLoader:
             data["move"],
             data["rep"]
         )
+
+        train_mask = y_train > 0
+        X_train = X_train[train_mask]
+        y_train = y_train[train_mask]
+        y_train -= 1
         
         # Get windowed data for test set
         X_test, y_test, _ = get_windows(
@@ -280,21 +281,34 @@ class NinaProDatasetLoader:
             data["move"],
             data["rep"]
         )
-        
+
+        test_mask = y_test > 0
+        X_test = X_test[test_mask]
+        y_test = y_test[test_mask]
+        y_test -= 1
         # Shuffle the data
-        X_train, y_train = shuffle(X_train, y_train, random_state=42)
-        X_test, y_test = shuffle(X_test, y_test, random_state=42)
+        X_train, y_train = shuffle(X_train, y_train, random_state=39)
+        X_test, y_test = shuffle(X_test, y_test, random_state=39)
+
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_train, y_train, test_size=0.2, random_state=42, stratify=y_train
+        )
         
         # Convert to PyTorch tensors
         X_train = torch.FloatTensor(X_train).squeeze(-1)
         y_train = torch.LongTensor(y_train)
         X_test = torch.FloatTensor(X_test).squeeze(-1)
         y_test = torch.LongTensor(y_test)
+        X_val = torch.FloatTensor(X_val).squeeze(-1)
+        y_val = torch.LongTensor(y_val)
         # Permutate the data to (n_samples, n_channels, n_timepoints)
         X_train = X_train.permute(0, 2, 1)
         X_test = X_test.permute(0, 2, 1)
+        X_val = X_val.permute(0, 2, 1)
+
         
-        return X_train, y_train, X_test, y_test
+        return X_train, y_train, X_val, y_val, X_test, y_test
+        
     
     def load_few_shot_learning_data(self):
         """
@@ -311,6 +325,12 @@ class NinaProDatasetLoader:
             data = import_db2(self.folder_path, self.subject, self.rest_length_cap)
         else:
             raise ValueError("Database must be 1 or 2")
+        
+        # Remove the resting movement
+        mask = data["move"] != 0
+        data["emg"] = data["emg"][mask]
+        data["move"] = data["move"][mask]
+        data["rep"] = data["rep"][mask]
         
         # Normalize data
         normalized_emg = normalise_emg(data["emg"], data["rep"], reps)
@@ -333,7 +353,7 @@ class NinaProDatasetLoader:
             data["rep"]
         )
         
-        # Split by class for FSL (0 is excluded as it is rest and influences the overall performance significantly)
+        # Split by class for FSL (0 is excluded as it is the rest movement and influences the overall performance significantly)
         mask_train = (y_all > 0) & (y_all < 41)
         mask_test = (y_all >= 41) & (y_all < 50)
         X_train, y_train = X_all[mask_train], y_all[mask_train]
@@ -342,18 +362,28 @@ class NinaProDatasetLoader:
         # Shuffle the data
         X_train, y_train = shuffle(X_train, y_train, random_state=39)
         X_test, y_test = shuffle(X_test, y_test, random_state=39)
+
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_train, y_train, test_size=0.2, random_state=42, stratify=y_train
+        )
+
+        y_train -= 1
+        y_test -= 1
+        y_val -= 1
         
         # Convert to PyTorch tensors
         X_train = torch.FloatTensor(X_train).squeeze(-1)
         y_train = torch.LongTensor(y_train)
         X_test = torch.FloatTensor(X_test).squeeze(-1)
         y_test = torch.LongTensor(y_test)
+        X_val = torch.FloatTensor(X_val).squeeze(-1)
+        y_val = torch.LongTensor(y_val)
 
         # Permutate the data into the correct shape
         X_train = X_train.permute(0, 2, 1)
         X_test = X_test.permute(0, 2, 1)
-        
-        return X_train, y_train, X_test, y_test
+        X_val = X_val.permute(0, 2, 1)
+        return X_train, y_train, X_val, y_val, X_test, y_test
 
     
     # from https://github.com/parasgulati8/NinaPro-Helper-Library/blob/master/NinaPro_Utility.py

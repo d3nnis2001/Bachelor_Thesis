@@ -72,7 +72,34 @@ def take_n_shots(X, y, n_shots, y_target):
     X_target = X[mask]
     y_target = y[mask]
     # Select n_shots from the target class randomly
-    mask_shots = np.random.choice(len(X_target), n_shots, replace=False)
-    X_shots = X_target[mask_shots]
-    y_shots = y_target[mask_shots]
+    indices = torch.randperm(X_target.size(0))[:n_shots]
+    X_shots = X_target[indices]
+    y_shots = y_target[indices]
     return X_shots, y_shots
+
+def take_n_samples_from_every_class(X, y, n_samples):
+    """
+    Take n_samples from every class.
+
+    Parameters:
+    -----------
+    X : numpy.ndarray
+        Input data
+    y : numpy.ndarray
+        Target labels
+    n_samples : int
+        Number of samples to take from each class
+    """
+    X_samples = []
+    y_samples = []
+    # Loop through all classes
+    for i in torch.unique(y):
+        mask = y == i
+        X_class = X[mask]
+        y_class = y[mask]
+        indices = torch.randperm(X_class.size(0))[:n_samples]
+        X_sample = X_class[indices]
+        y_sample = y_class[indices]
+        X_samples.append(X_sample)
+        y_samples.append(y_sample)
+    return torch.cat(X_samples, dim=0), torch.cat(y_samples, dim=0)

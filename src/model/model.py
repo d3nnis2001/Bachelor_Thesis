@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from torch.utils.data import TensorDataset, DataLoader
+import copy
 from model.layer import GLVQ, GMLVQ
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -80,7 +81,7 @@ class CNet2D(nn.Module):
         )
         # TODO: Make this dynamic instead of hardcoded
         if dataset_type == "NinaPro":
-            flattened_size = 5120
+            flattened_size = 13824
         elif dataset_type == "NearLab":
             flattened_size = 5120
         
@@ -99,13 +100,9 @@ class CNet2D(nn.Module):
         if self.version == "Softmax":
             nn.Linear(50, num_classes)
             self.classifier = nn.Softmax(dim=1)
-
-            
-            # GLVQ layer
         elif self.version == "GLVQ":
             self.classifier = GLVQ(50, self.num_prototypes_per_class, self.num_classes)
         else:
-            # GMLVQ layer
             self.classifier = GMLVQ(50, self.num_prototypes_per_class, self.num_classes)
 
         self.to(self.device)
@@ -133,6 +130,10 @@ class CNet2D(nn.Module):
         -----------
         x : torch.Tensor
             Input data
+        y : torch.Tensor
+            Target labels
+        t_value : int
+            Time value for the loss
         """
         # Move data to device
         x = x.to(self.device)
@@ -148,7 +149,6 @@ class CNet2D(nn.Module):
             return self.classifier(features, y, t_value)
     
     def fit(self, X, y, patience=10, X_val = None, y_val = None):
-        # TODO: Implement Learning rate scheduler maybe? With decreasing learning rate from 0.0002 to 0.00005
         """
         Fits the model to the input train data X and y
 
@@ -226,9 +226,9 @@ class CNet2D(nn.Module):
             avg_loss = torch.mean(te)
             avg_val_loss = torch.mean(tv)
 
-            history["loss"].append(avg_loss)
-            history["epoch"].append(epoch + 1)
-            history["val_loss"].append(avg_val_loss)
+            history["loss"].append(str(avg_loss.tolist()))
+            history["epoch"].append(str(epoch + 1))
+            history["val_loss"].append(str(avg_val_loss.tolist()))
             
             print(f"Epoch {epoch + 1}/{self.epochs}, Loss: {avg_loss:.4f}")
             print(f"Validation loss: {avg_val_loss}")
@@ -279,122 +279,85 @@ class CNet2D(nn.Module):
         -----------
         new_data : torch.Tensor
             Data of new class
-        new_labels : torch.Tensor
-            Label of new class
-        num_prototypes : int
-            Number of prototypes for the class
         """
+        new_data = new_data.to(self.device)
         if self.version in ["GLVQ", "GMLVQ"]:
             with torch.no_grad():
-                new_data = new_data.to(self.device)
                 # Extract features
                 features = self.extract_features(new_data)
                 # Calc mean of training data
                 class_mean = features.mean(dim=0)
                 # Repeat it incase we have multiple prototypes
-                prototype_features = class_mean.repeat(self.num_prototypes_per_class, 1)
+                prototype_features = class_mean.repeat(self.num_prototypes_per_class, 1).clone().detach()
 
                 new_class_index = self.classifier.num_classes
 
-                prototype_labels = torch.full(self.num_prototypes_per_class, new_class_index, dtype=torch.long, device=self.device)
+                prototype_labels = torch.full(
+                    (self.num_prototypes_per_class,), 
+                    new_class_index, 
+                    dtype=torch.long, 
+                    device=self.device
+                )
                 # Adds the Prototype to the layer
                 self.classifier.add_prototypes(prototype_features, prototype_labels)
-        else:
-            with torch.no_grad():
-                # Get the new class index
-                new_class_index = self.classifier.num_classes
-                # Get the number of features
-                num_features = self.classifier.weight.size(1)
-                # Initialize new weights and bias
-                new_weights = torch.randn(1, num_features, device=self.device) * 0.01
-                new_bias = torch.zeros(1, device=self.device)
-                # Concatenate the new weights and bias with the existing ones
-                self.classifier.weight = torch.nn.Parameter(torch.cat([self.classifier.weight, new_weights], dim=0))
-                self.classifier.bias = torch.nn.Parameter(torch.cat([self.classifier.bias, new_bias], dim=0))
-                # Update the number of classes
-                self.classifier.num_classes += 1
         
-    def optimize_new_prototypes(self, new_data, epochs=5):
+    def optimize_new_prototypes(self, new_data, epochs=5, batch_size=8):
         """
-        Optimizes the new prototypes for few-shot learning.
-        
+        Optimizes the new prototypes for the new class with the given data. Old prototypes are frozen.
+
         Parameters:
         -----------
         new_data : torch.Tensor
-            Data of the new class.
+            Data of the new class
         epochs : int
-            Number of optimization steps.
+            Number of epochs for optimization
+        batch_size : int
+            Batch size for optimization
         """
-        if self.version in ["GLVQ", "GMLVQ"]:
-            new_data = new_data.to(self.device)
-            
-            # Get the new class index
-            new_class_index = self.classifier.num_classes 
-            
-            # Select the new prototypes
-            new_prototypes_start = (new_class_index - 1) * self.num_prototypes_per_class
-            new_prototypes_end = new_class_index * self.num_prototypes_per_class
-            new_prototypes = self.classifier.prototypes[new_prototypes_start:new_prototypes_end]
-            
-            # Create optimizer for the new prototypes only
-            optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)([new_prototypes], lr=self.learning_rate)
-            
-            train_labels = torch.full(
-                (new_data.size(0),), 
-                new_class_index, 
-                dtype=torch.long, 
-                device=self.device
-            )
-            train_dataset = TensorDataset(new_data, train_labels)
-            train_loader = DataLoader(
-                train_dataset, 
-                batch_size=min(32, len(new_data)), 
-                shuffle=True
-            )
-            # Train the new prototypes
-            for epoch in range(epochs):
-                epoch_loss = 0
-                self.classifier.train()
-                for batch_X, batch_y in train_loader:
-                    optimizer.zero_grad()
-                    features = self.extract_features(batch_X)
-                    loss = self.classifier(features, batch_y, t_value=epoch)
-                    loss.backward()
-                    
-                    optimizer.step()
-                    epoch_loss += loss.item()
-                
-                print(f"FSL Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}")
-        else:
-            # Optimizer
-            optimizer = (optim.Adam if self.optimizer_type == "ADAM" else optim.SGD)(self.parameters(), lr=self.learning_rate)
-            # Set training labels to the new class
-            train_labels = torch.full(
-                (new_data.size(0),), 
-                self.classifier.num_classes - 1, 
-                dtype=torch.long, 
-                device=self.device
-            )
-            # New data and labels
-            train_dataset = TensorDataset(new_data, train_labels)
-            train_loader = DataLoader(
-                train_dataset, 
-                batch_size=min(32, len(new_data)), 
-                shuffle=True
-            )
-            # Optimize the new class
-            for epoch in range(epochs):
-                epoch_loss = 0
-                self.train()
-                for batch_X, batch_y in train_loader:
-                    optimizer.zero_grad()
-                    predictions = self(batch_X)
-                    loss = torch.nn.functional.cross_entropy(predictions, batch_y)
-                    loss.backward()
-                    optimizer.step()
-                    epoch_loss += loss.item()
+        new_data = new_data.to(self.device)
 
-                print(f"Softmax FSL Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}")
+        # Label for new class
+        new_class_index = self.classifier.num_classes - 1
+        new_labels = torch.full(
+            (new_data.size(0),), 
+            new_class_index, 
+            dtype=torch.long, 
+            device=self.device
+        )
+
+        # Dataloader for new data
+        dataset = TensorDataset(new_data, new_labels)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        # Count of "old" prototypes
+        old_class_count = self.classifier.num_classes - 1
+        # End index of old prototypes
+        old_prototypes_end = old_class_count * self.num_prototypes_per_class
+        # Adam optimizer for new prototypes
+        optimizer = torch.optim.Adam([self.classifier.prototypes], lr=self.learning_rate)
+
+        for epoch in range(epochs):
+            epoch_loss = 0.0
+            self.classifier.train()
+
+            for batch_X, batch_y in dataloader:
+                optimizer.zero_grad()
+                features = self.extract_features(batch_X)
+                # Run forward pass
+                loss = self.classifier(features, batch_y, t_value=(epoch + 1))
+                loss.backward()
+
+                # Freeze old prototypes to prevent updates
+                with torch.no_grad():
+                    if self.classifier.prototypes.grad is not None:
+                        self.classifier.prototypes.grad[:old_prototypes_end, :].zero_()
+                # Parameter update
+                optimizer.step()
+                epoch_loss += loss.item()
+
+            print(f"[Epoch {epoch+1}/{epochs}] Loss: {epoch_loss:.4f}")
+
+
+
             
     def evaluate_model(self, X, y, conf_matrix=False, sub_acc=False):
         """
@@ -462,10 +425,6 @@ class CNet2D(nn.Module):
         
         return {
             "accuracy": accuracy.item(),
-            "confusion_matrix": cm,
-            "per_class_accuracy": per_class_acc,
-            "predictions": y_pred,
-            "true_labels": y_true
         }
     
     def save_model_state(self, save_path):
@@ -484,6 +443,7 @@ class CNet2D(nn.Module):
         torch.save(self.state_dict(), save_file)
         print(f"Model state saved to {save_file}")
     
+
     def save_history_csv(self, history, save_path):
         """
         Saves the training history to a CSV file.
@@ -495,9 +455,14 @@ class CNet2D(nn.Module):
         save_path : str
             Path to the directory where the CSV file will be saved.
         """
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-        df = pd.DataFrame(history)
+        
+        # Erstelle das Verzeichnis, falls es nicht existiert
+        os.makedirs(save_path, exist_ok=True)
+        
+        # Erstelle den DataFrame aus history
+        df = pd.DataFrame([history])  # History als einzelne Zeile
+        
+        # Speichern des DataFrames als CSV
         save_file = os.path.join(save_path, "training_history.csv")
         df.to_csv(save_file, index=False)
         print(f"Training history saved to {save_file}")
@@ -516,3 +481,9 @@ class CNet2D(nn.Module):
             os.makedirs(path)
         self.load_state_dict(torch.load(path))
         self.eval()
+
+    def clone(self):
+        """
+        Clones the current model.
+        """
+        return copy.deepcopy(self)
