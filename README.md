@@ -64,7 +64,7 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-[![CNet2D][about-pic]]
+![CNet2D](images/About.png)
 
 This project implements PyTorch layers for the machine learning models GLVQ and GMLVQ, along with a CNN architecture (CNet2D) that leverages three convolutional blocks and two dense layers. The network processes features before utilizing the newly implemented layer for classification.
 
@@ -78,7 +78,7 @@ Designed for Few-Shot Learning, the framework allows seamless addition of new pr
 
 * [![Pytorch][Pytorch]][Pytorch-url]
 * [![Pandas][Pandas]][Pandas-url]
-* [![scikit-learn][Sklearn]][scikit-learn-url]
+* [![scikit-learn][scikit-learn]][scikit-learn-url]
 
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -88,14 +88,14 @@ Designed for Few-Shot Learning, the framework allows seamless addition of new pr
 
 The experiments evaluate the performance and adaptability of the proposed prototype-based classification layer compared to the traditional Softmax classifier. Key findings include:
 
-[![Accuracy per Participant for each Model][accuracy-pic]]
+![Accuracy per Participant for each Model](images/barplot1.png)
 
 - **Prototype-based vs. Softmax:** The prototype-based methods (GLVQ, GMLVQ) performed on par with Softmax across different evaluation scenarios, demonstrating comparable accuracy while offering benefits in interpretability and adaptability.
 - **Impact of Prototypes per Class:** Increasing the number of prototypes per class slightly improved GLVQ's accuracy, while GMLVQ showed minimal variation, indicating that the CNN backbone already provides strong feature separability.
 - **Computational Performance:** Prototype-based layers achieved faster inference times than Softmax, making them more suitable for real-time applications.
 - **Few-Shot Learning:** GLVQ outperformed GMLVQ in few-shot learning scenarios, effectively classifying new movement patterns with minimal training samples.
 
-[![Few-shot learning results for GLVQ and GMLVQ][fsl-pic]]
+![Few-shot learning results for GLVQ and GMLVQ](images/fsl.png)
 
 Overall, these results highlight the robustness of prototype-based learning for sEMG classification, particularly in scenarios requiring rapid adaptation.
 
@@ -142,9 +142,3 @@ I would like to express my gratitude to the following:
 [Pandas-url]: https://pandas.pydata.org/
 [scikit-learn]: https://img.shields.io/badge/scikit--learn-F7931E?style=flat-square&logo=scikit-learn&logoColor=white
 [scikit-learn-url]: https://scikit-learn.org/stable/
-
-<!-- Images -->
-[about-pic]: images/About.png
-[fsl-pic]: images/fsl.png
-[accuracy-pic]: images/barplot1.png
-[logo-pic]: images/Logo.png
