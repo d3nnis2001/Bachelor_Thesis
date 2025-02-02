@@ -119,7 +119,7 @@ Project Link: [https://github.com/d3nnis2001/Prototype-based-sEMG-signal-classif
 
 I would like to express my gratitude to the following:
 
-- **Prof. [Benjamin Paaßen]** for their valuable insights and guidance.
+- **Prof. Benjamin Paaßen** for their valuable insights and guidance.
 - The **PyTorch**, **Scikit-learn**, and **Pandas** communities for providing excellent open-source tools.
 - The **Ninapro** and **Nearlab** teams for making their datasets publicly available.
 - The contributors of the **Best-README-Template**, which inspired the structure of this document.
